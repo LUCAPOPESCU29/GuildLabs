@@ -19,7 +19,7 @@ export default {
     const cfg = Config.get(guildId);
 
     if (!cfg.ticketCategoryId || !cfg.ticketRoleId) {
-      return interaction.reply({ content: "❌ Tickets are not configured. Ask an admin to run `/config tickets`.", ephemeral: true });
+      return interaction.reply({ content: "❌ Tickets are not configured. Ask an admin to run `/config tickets`.", flags: 64 });
     }
 
     // Check for existing open ticket
@@ -27,7 +27,7 @@ export default {
       (c) => c.name === `ticket-${interaction.user.username.toLowerCase()}` && c.parentId === cfg.ticketCategoryId
     );
     if (existing) {
-      return interaction.reply({ content: `❌ You already have an open ticket: ${existing}`, ephemeral: true });
+      return interaction.reply({ content: `❌ You already have an open ticket: ${existing}`, flags: 64 });
     }
 
     const ticketChannel = await interaction.guild.channels.create({
@@ -57,6 +57,6 @@ export default {
     );
 
     await ticketChannel.send({ embeds: [embed], components: [row] });
-    return interaction.reply({ content: `✅ Your ticket has been created: ${ticketChannel}`, ephemeral: true });
+    return interaction.reply({ content: `✅ Your ticket has been created: ${ticketChannel}`, flags: 64 });
   },
 };

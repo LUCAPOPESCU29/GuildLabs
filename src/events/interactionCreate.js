@@ -12,7 +12,7 @@ export default {
         await command.execute(interaction);
       } catch (err) {
         console.error(`[CMD] Error in /${interaction.commandName}:`, err);
-        const msg = { content: "❌ An error occurred. Please try again.", ephemeral: true };
+        const msg = { content: "❌ An error occurred. Please try again.", flags: 64 };
         if (interaction.deferred || interaction.replied) {
           await interaction.editReply(msg);
         } else {
@@ -28,18 +28,18 @@ export default {
       if (interaction.customId === "verify_user") {
         const cfg = Config.get(interaction.guild.id);
         if (!cfg.verifyRoleId) {
-          return interaction.reply({ content: "❌ Verification is not configured.", ephemeral: true });
+          return interaction.reply({ content: "❌ Verification is not configured.", flags: 64 });
         }
         const role = interaction.guild.roles.cache.get(cfg.verifyRoleId);
-        if (!role) return interaction.reply({ content: "❌ Verify role not found.", ephemeral: true });
+        if (!role) return interaction.reply({ content: "❌ Verify role not found.", flags: 64 });
 
         const member = interaction.member;
         if (member.roles.cache.has(role.id)) {
-          return interaction.reply({ content: "✅ You're already verified!", ephemeral: true });
+          return interaction.reply({ content: "✅ You're already verified!", flags: 64 });
         }
 
         await member.roles.add(role, "Forge verification");
-        return interaction.reply({ content: `✅ Verified! You've been given the **${role.name}** role.`, ephemeral: true });
+        return interaction.reply({ content: `✅ Verified! You've been given the **${role.name}** role.`, flags: 64 });
       }
 
       // Close ticket button
@@ -50,7 +50,7 @@ export default {
         const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
 
         if (!isSupport && !isAdmin) {
-          return interaction.reply({ content: "❌ Only support staff can close tickets.", ephemeral: true });
+          return interaction.reply({ content: "❌ Only support staff can close tickets.", flags: 64 });
         }
 
         await interaction.reply({ content: "🔒 Closing ticket in 5 seconds…" });

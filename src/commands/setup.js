@@ -19,7 +19,7 @@ export default {
     ),
 
   async execute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
 
     const attachment = interaction.options.getAttachment("blueprint");
 

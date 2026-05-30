@@ -17,11 +17,11 @@ export default {
   async execute(interaction) {
     const cfg = Config.get(interaction.guild.id);
     if (!cfg.verifyChannelId || !cfg.verifyRoleId) {
-      return interaction.reply({ content: "❌ Run `/config verification` first.", ephemeral: true });
+      return interaction.reply({ content: "❌ Run `/config verification` first.", flags: 64 });
     }
 
     const channel = interaction.guild.channels.cache.get(cfg.verifyChannelId);
-    if (!channel) return interaction.reply({ content: "❌ Verify channel not found.", ephemeral: true });
+    if (!channel) return interaction.reply({ content: "❌ Verify channel not found.", flags: 64 });
 
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
@@ -39,6 +39,6 @@ export default {
     );
 
     await channel.send({ embeds: [embed], components: [row] });
-    return interaction.reply({ content: `✅ Verification panel posted in ${channel}.`, ephemeral: true });
+    return interaction.reply({ content: `✅ Verification panel posted in ${channel}.`, flags: 64 });
   },
 };

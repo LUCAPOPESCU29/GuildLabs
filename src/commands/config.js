@@ -65,42 +65,42 @@ export default {
         )
         .setFooter({ text: "Use /config <feature> to change settings" });
 
-      return interaction.reply({ embeds: [embed], ephemeral: true });
+      return interaction.reply({ embeds: [embed], flags: 64 });
     }
 
     if (sub === "welcome") {
       const channel = interaction.options.getChannel("channel");
       const message = interaction.options.getString("message") ?? "Welcome to **{server}**, {user}! 🎉";
       Config.merge(guildId, { welcomeChannelId: channel.id, welcomeMessage: message });
-      return interaction.reply({ content: `✅ Welcome messages will be sent in ${channel} with message:\n> ${message}`, ephemeral: true });
+      return interaction.reply({ content: `✅ Welcome messages will be sent in ${channel} with message:\n> ${message}`, flags: 64 });
     }
 
     if (sub === "verification") {
       const channel = interaction.options.getChannel("channel");
       const role = interaction.options.getRole("role");
       Config.merge(guildId, { verifyChannelId: channel.id, verifyRoleId: role.id });
-      return interaction.reply({ content: `✅ Verification set up in ${channel}. Users will get <@&${role.id}> after clicking Verify.`, ephemeral: true });
+      return interaction.reply({ content: `✅ Verification set up in ${channel}. Users will get <@&${role.id}> after clicking Verify.`, flags: 64 });
     }
 
     if (sub === "antiraid") {
       const enabled = interaction.options.getBoolean("enabled");
       const threshold = interaction.options.getInteger("threshold") ?? 10;
       Config.merge(guildId, { antiRaid: enabled, antiRaidThreshold: threshold });
-      return interaction.reply({ content: `✅ Anti-raid ${enabled ? `enabled (threshold: ${threshold} joins/10s)` : "disabled"}.`, ephemeral: true });
+      return interaction.reply({ content: `✅ Anti-raid ${enabled ? `enabled (threshold: ${threshold} joins/10s)` : "disabled"}.`, flags: 64 });
     }
 
     if (sub === "leveling") {
       const enabled = interaction.options.getBoolean("enabled");
       const announce = interaction.options.getChannel("announce");
       Config.merge(guildId, { leveling: enabled, levelAnnounceId: announce?.id ?? null });
-      return interaction.reply({ content: `✅ Leveling ${enabled ? "enabled" : "disabled"}${announce ? ` — level-ups announced in ${announce}` : ""}.`, ephemeral: true });
+      return interaction.reply({ content: `✅ Leveling ${enabled ? "enabled" : "disabled"}${announce ? ` — level-ups announced in ${announce}` : ""}.`, flags: 64 });
     }
 
     if (sub === "tickets") {
       const category = interaction.options.getChannel("category");
       const role = interaction.options.getRole("support_role");
       Config.merge(guildId, { ticketCategoryId: category.id, ticketRoleId: role.id });
-      return interaction.reply({ content: `✅ Tickets enabled in category ${category} — <@&${role.id}> will have access.`, ephemeral: true });
+      return interaction.reply({ content: `✅ Tickets enabled in category ${category} — <@&${role.id}> will have access.`, flags: 64 });
     }
   },
 };
