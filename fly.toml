@@ -1,0 +1,15 @@
+[build]
+
+[env]
+  BOT_API_PORT = "8080"
+  NODE_ENV = "production"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 8080
+
+[processes]
+  app = "node src/index.js"
