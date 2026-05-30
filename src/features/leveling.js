@@ -1,21 +1,32 @@
 import { EmbedBuilder } from "discord.js";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
-/**
- * Simple XP leveling system.
- * XP is stored in-memory (persists per restart via config-store if you hook it in).
- * Formula: level = floor(sqrt(totalXP / 100))
- */
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const XP_PATH = join(__dirname, "../../data/xp-store.json");
 
-// guildId → userId → { total, lastMessage }
-const xpStore = new Map();
+mkdirSync(join(__dirname, "../../data"), { recursive: true });
 
-// Cooldown: 1 XP gain per 60 seconds per user
-const COOLDOWN_MS = 60_000;
-const XP_PER_MESSAGE = 15;
+// ── Persistent XP store ──────────────────────────────────────────────────────
+// Structure: { [guildId]: { [userId]: { total, lastMessage } } }
+let xpStore = {};
+if (existsSync(XP_PATH)) {
+  try { xpStore = JSON.parse(readFileSync(XP_PATH, "utf8")); } catch {}
+}
 
+function saveXP() {
+  writeFileSync(XP_PATH, JSON.stringify(xpStore, null, 2));
+}
+
+// ── Constants ────────────────────────────────────────────────────────────────
+const COOLDOWN_MS = 15_000; // 15 seconds between XP gains (was 60s, too slow for testing)
+const XP_MIN = 15;
+const XP_MAX = 25;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 export function getXP(guildId, userId) {
-  const guild = xpStore.get(guildId) ?? new Map();
-  return guild.get(userId) ?? { total: 0, lastMessage: 0 };
+  return xpStore[guildId]?.[userId] ?? { total: 0, lastMessage: 0 };
 }
 
 export function levelFromXP(totalXP) {
@@ -35,22 +46,22 @@ export async function handleXP(message, cfg, client) {
   const userId = message.author.id;
   const now = Date.now();
 
-  if (!xpStore.has(guildId)) xpStore.set(guildId, new Map());
-  const guild = xpStore.get(guildId);
-  const data = guild.get(userId) ?? { total: 0, lastMessage: 0 };
+  if (!xpStore[guildId]) xpStore[guildId] = {};
+  const data = xpStore[guildId][userId] ?? { total: 0, lastMessage: 0 };
 
   // Cooldown check
   if (now - data.lastMessage < COOLDOWN_MS) return;
 
   const prevLevel = levelFromXP(data.total).level;
-  data.total += XP_PER_MESSAGE + Math.floor(Math.random() * 10); // 15-24 XP
+  data.total += XP_MIN + Math.floor(Math.random() * (XP_MAX - XP_MIN + 1));
   data.lastMessage = now;
-  guild.set(userId, data);
+  xpStore[guildId][userId] = data;
+  saveXP();
 
   const { level } = levelFromXP(data.total);
 
   // Announce level-up
-  if (level > prevLevel) {
+  if (level > prevLevel && level > 0) {
     const announceId = cfg.levelAnnounceId;
     const channel = announceId
       ? message.guild.channels.cache.get(announceId)
@@ -59,8 +70,11 @@ export async function handleXP(message, cfg, client) {
     if (channel) {
       const embed = new EmbedBuilder()
         .setColor(0x5865f2)
-        .setDescription(`🎉 ${message.author} leveled up to **Level ${level}**!`)
-        .setThumbnail(message.author.displayAvatarURL());
+        .setTitle("🎉 Level Up!")
+        .setDescription(`${message.author} reached **Level ${level}**! Keep it up!`)
+        .setThumbnail(message.author.displayAvatarURL({ size: 128 }))
+        .setFooter({ text: "GuildLabs Leveling" })
+        .setTimestamp();
 
       await channel.send({ embeds: [embed] }).catch(() => {});
     }
