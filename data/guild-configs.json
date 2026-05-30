@@ -3,6 +3,10 @@
     "ticketCategoryId": "1060618287752429592",
     "ticketRoleId": "1510402694295064579",
     "leveling": true,
-    "levelAnnounceId": "1060618287752429595"
+    "levelAnnounceId": "1060618287752429595",
+    "antiRaid": true,
+    "antiRaidThreshold": 10,
+    "verifyChannelId": "1060618287752429595",
+    "verifyRoleId": "1060618287752429589"
   }
 }

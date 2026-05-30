@@ -21,10 +21,22 @@ export default {
   async execute(interaction) {
     await interaction.deferReply({ flags: 64 });
 
+    // Permission preflight — the deployer creates roles + channels
+    const me = interaction.guild.members.me;
+    const missing = [];
+    if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) missing.push("Manage Roles");
+    if (!me.permissions.has(PermissionFlagsBits.ManageChannels)) missing.push("Manage Channels");
+    if (missing.length) {
+      return interaction.editReply(
+        `❌ I'm missing required permissions: **${missing.join(", ")}**.\n\n` +
+          `Give me these in Server Settings → Roles (or re-invite me with the Administrator permission), then try again.`
+      );
+    }
+
     const attachment = interaction.options.getAttachment("blueprint");
 
     if (!attachment.name.endsWith(".json")) {
-      return interaction.editReply("❌ Please upload a valid `.json` file from the Forge builder.");
+      return interaction.editReply("❌ Please upload a valid `.json` file from the GuildLabs builder.");
     }
 
     let blueprint;
