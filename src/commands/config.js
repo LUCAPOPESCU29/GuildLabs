@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } from "discord.js";
+import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ChannelType } from "discord.js";
 import { Config } from "../lib/config-store.js";
 
 export default {
@@ -10,14 +10,14 @@ export default {
     .addSubcommand((s) =>
       s.setName("welcome")
         .setDescription("Set the welcome channel and message")
-        .addChannelOption((o) => o.setName("channel").setDescription("Channel to send welcome messages in").setRequired(true))
+        .addChannelOption((o) => o.setName("channel").setDescription("Channel to send welcome messages in").addChannelTypes(ChannelType.GuildText).setRequired(true))
         .addStringOption((o) => o.setName("message").setDescription("Welcome message — use {user} for mention, {server} for name").setRequired(false))
     )
     // verification
     .addSubcommand((s) =>
       s.setName("verification")
         .setDescription("Set up a verification gate")
-        .addChannelOption((o) => o.setName("channel").setDescription("Channel where users verify").setRequired(true))
+        .addChannelOption((o) => o.setName("channel").setDescription("Channel where users verify").addChannelTypes(ChannelType.GuildText).setRequired(true))
         .addRoleOption((o) => o.setName("role").setDescription("Role granted after verification").setRequired(true))
     )
     // anti-raid
@@ -32,13 +32,13 @@ export default {
       s.setName("leveling")
         .setDescription("Enable XP leveling")
         .addBooleanOption((o) => o.setName("enabled").setDescription("Enable or disable leveling").setRequired(true))
-        .addChannelOption((o) => o.setName("announce").setDescription("Channel to announce level-ups in").setRequired(false))
+        .addChannelOption((o) => o.setName("announce").setDescription("Channel to announce level-ups in").addChannelTypes(ChannelType.GuildText).setRequired(false))
     )
     // tickets
     .addSubcommand((s) =>
       s.setName("tickets")
         .setDescription("Set up the ticket system")
-        .addChannelOption((o) => o.setName("category").setDescription("Category to create ticket channels in").setRequired(true))
+        .addChannelOption((o) => o.setName("category").setDescription("Category to create ticket channels in").addChannelTypes(ChannelType.GuildCategory).setRequired(true))
         .addRoleOption((o) => o.setName("support_role").setDescription("Role that can see tickets").setRequired(true))
     )
     // show
