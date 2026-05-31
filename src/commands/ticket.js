@@ -2,76 +2,140 @@ import {
   SlashCommandBuilder,
   ChannelType,
   PermissionFlagsBits,
-  EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
 } from "discord.js";
 import { Config } from "../lib/config-store.js";
+import {
+  brandEmbed,
+  successEmbed,
+  errorEmbed,
+  replyError,
+  BRAND,
+  EPHEMERAL,
+} from "../lib/embeds.js";
 
 export default {
   data: new SlashCommandBuilder()
     .setName("ticket")
-    .setDescription("Open a support ticket"),
+    .setDescription("Open a private support ticket"),
 
   async execute(interaction) {
-    await interaction.deferReply({ flags: 64 });
+    await interaction.deferReply(EPHEMERAL);
 
-    const guildId = interaction.guild.id;
-    const cfg = Config.get(guildId);
-
+    const cfg = Config.get(interaction.guild.id);
     if (!cfg.ticketCategoryId || !cfg.ticketRoleId) {
-      return interaction.editReply("❌ Tickets aren't configured yet. An admin needs to run `/config tickets`.");
+      return replyError(
+        interaction,
+        "Tickets aren't set up yet",
+        "Ask an admin to run **`/config tickets`** first."
+      );
     }
 
     // Validate the category still exists
     const category = interaction.guild.channels.cache.get(cfg.ticketCategoryId);
-    if (!category) {
-      return interaction.editReply("❌ The ticket category no longer exists. Ask an admin to re-run `/config tickets`.");
+    if (!category || category.type !== ChannelType.GuildCategory) {
+      return replyError(
+        interaction,
+        "Ticket category is missing",
+        "Ask an admin to re-run **`/config tickets`** with a valid category."
+      );
     }
 
-    // Bot needs Manage Channels to create the ticket
+    // Permission preflight
     const me = interaction.guild.members.me;
     if (!me.permissions.has(PermissionFlagsBits.ManageChannels)) {
-      return interaction.editReply("❌ I need the **Manage Channels** permission to create ticket channels.");
+      return replyError(
+        interaction,
+        "I'm missing the Manage Channels permission",
+        "Give me that permission and try again. `/diagnose` shows the full checklist."
+      );
     }
 
-    // Check for an existing open ticket
-    const safeName = `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+    // Already-open ticket?
+    const safeName = `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9-]/g, "")}`;
     const existing = interaction.guild.channels.cache.find(
       (c) => c.name === safeName && c.parentId === cfg.ticketCategoryId
     );
     if (existing) {
-      return interaction.editReply(`❌ You already have an open ticket: ${existing}`);
+      const embed = brandEmbed(BRAND.warning)
+        .setTitle("You already have an open ticket")
+        .setDescription(`Continue the conversation in ${existing}, or click **Close Ticket** there to close it.`);
+      return interaction.editReply({ embeds: [embed] });
     }
 
+    // Create the ticket channel
     const ticketChannel = await interaction.guild.channels.create({
       name: safeName,
       type: ChannelType.GuildText,
       parent: cfg.ticketCategoryId,
+      topic: `Ticket opened by ${interaction.user.tag} · ${interaction.user.id}`,
       permissionOverwrites: [
         { id: interaction.guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-        { id: cfg.ticketRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages] },
+        {
+          id: interaction.user.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.AttachFiles,
+            PermissionFlagsBits.EmbedLinks,
+            PermissionFlagsBits.ReadMessageHistory,
+          ],
+        },
+        {
+          id: cfg.ticketRoleId,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ManageMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+          ],
+        },
+        {
+          id: me.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ManageChannels,
+          ],
+        },
       ],
       reason: `Ticket opened by ${interaction.user.tag}`,
     });
 
-    const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle("🎫 Support Ticket")
-      .setDescription(`Hello ${interaction.user}! Support will be with you shortly.\n\nDescribe your issue below.`)
-      .setFooter({ text: "Click Close Ticket when resolved" })
-      .setTimestamp();
+    // Welcome message inside the ticket
+    const welcome = brandEmbed(BRAND.primary)
+      .setTitle("🎫 Support ticket")
+      .setDescription(
+        `Hi ${interaction.user}, support will be with you shortly.\n\nPlease describe your issue in detail — screenshots welcome.`
+      )
+      .addFields({
+        name: "How this works",
+        value:
+          "• Only you and the support team can see this channel\n" +
+          "• Staff click **Close Ticket** when it's resolved\n" +
+          "• The channel will be deleted 5 seconds after closing",
+      });
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("close_ticket")
-        .setLabel("🔒 Close Ticket")
+        .setLabel("Close Ticket")
+        .setEmoji("🔒")
         .setStyle(ButtonStyle.Danger)
     );
 
-    await ticketChannel.send({ content: `${interaction.user} <@&${cfg.ticketRoleId}>`, embeds: [embed], components: [row] });
-    return interaction.editReply(`✅ Your ticket has been created: ${ticketChannel}`);
+    await ticketChannel.send({
+      content: `${interaction.user} <@&${cfg.ticketRoleId}>`,
+      embeds: [welcome],
+      components: [row],
+    });
+
+    const confirm = successEmbed(
+      "Your ticket is ready",
+      `Head over to ${ticketChannel} to chat with support.`
+    );
+    return interaction.editReply({ embeds: [confirm] });
   },
 };

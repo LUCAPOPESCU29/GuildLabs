@@ -29,6 +29,27 @@ export function getXP(guildId, userId) {
   return xpStore[guildId]?.[userId] ?? { total: 0, lastMessage: 0 };
 }
 
+/** Return the top N users for a guild, sorted by total XP descending. */
+export function getLeaderboard(guildId, limit = 10) {
+  const guild = xpStore[guildId];
+  if (!guild) return [];
+  return Object.entries(guild)
+    .map(([userId, data]) => ({ userId, total: data.total }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
+}
+
+/** Return a user's 1-indexed rank within their guild (or null if no XP). */
+export function getRank(guildId, userId) {
+  const guild = xpStore[guildId];
+  if (!guild?.[userId]) return null;
+  const sorted = Object.entries(guild)
+    .map(([id, data]) => ({ id, total: data.total }))
+    .sort((a, b) => b.total - a.total);
+  const idx = sorted.findIndex((e) => e.id === userId);
+  return idx === -1 ? null : idx + 1;
+}
+
 export function levelFromXP(totalXP) {
   const level = Math.floor(Math.sqrt(totalXP / 100));
   const xpForCurrent = level * level * 100;
