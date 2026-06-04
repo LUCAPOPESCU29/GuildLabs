@@ -365,15 +365,55 @@ async function getChartDataFromNasdaq(symbol: string, range: Range): Promise<Cha
   };
 }
 
+// ── ChartIt bot proxy ────────────────────────────────────────────────────────
+// Yahoo hard-blocks Vercel's shared datacenter IPs (even with a primed session),
+// so intraday ranges silently die here. The ChartIt bot runs on a different host
+// (Fly) whose IP Yahoo still serves, so we let it fetch the data and relay it.
+// The bot's /chart endpoint returns this exact ChartData shape. Activated only
+// when CHARTIT_BOT_URL is set, so the route still works (Yahoo → Nasdaq) without
+// it. CHARTIT_BOT_TOKEN, if set on both sides, gates the bot endpoint.
+const BOT_URL = (process.env.CHARTIT_BOT_URL ?? "").replace(/\/$/, "");
+const BOT_TOKEN = process.env.CHARTIT_BOT_TOKEN ?? "";
+
+async function getChartDataFromBot(symbol: string, range: Range): Promise<ChartData> {
+  if (!BOT_URL) throw new Error("bot proxy: CHARTIT_BOT_URL not set");
+  const url = `${BOT_URL}/chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`;
+  const res = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": UA,
+      ...(BOT_TOKEN ? { "x-chart-token": BOT_TOKEN } : {}),
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(9000),
+  });
+  if (!res.ok) throw new Error(`bot proxy: HTTP ${res.status}`);
+  const data = (await res.json()) as ChartData;
+  if (!Array.isArray(data?.candles) || data.candles.length === 0) {
+    throw new Error(`bot proxy: no candles for "${symbol}"`);
+  }
+  // Trust the bot's range/interval but pin them to the request so the chart's
+  // axis/countdown logic stays consistent with what the user selected.
+  return { ...data, range, interval: RANGES[range].interval, rangeLabel: RANGES[range].label };
+}
+
 /** Fetch OHLC + a live quote for `symbol` over `range`. Throws on no data. */
 export async function getChartData(symbol: string, range: Range): Promise<ChartData> {
   // Try Yahoo first (richer data, supports intraday + crypto + indices). If
-  // Yahoo throttles every reachable host, fall back to Nasdaq (Yahoo-free,
-  // daily-only — fine for chart ranges 5d → ytd). Original Yahoo error is
-  // surfaced if Nasdaq also has nothing.
+  // Yahoo throttles every reachable host (the norm from Vercel IPs), relay the
+  // request through the ChartIt bot, whose host Yahoo still serves — this is the
+  // only path that delivers genuine intraday candles. Nasdaq is the final
+  // fallback, but it's daily-only so it can't cover intraday ranges. Original
+  // Yahoo error is surfaced if every fallback also comes up empty.
   try {
     return await getChartDataFromYahoo(symbol, range);
   } catch (yErr) {
+    // The bot reaches Yahoo intraday, so try it for every range before Nasdaq.
+    try {
+      return await getChartDataFromBot(symbol, range);
+    } catch {
+      // bot unconfigured or unreachable — continue to Nasdaq for daily ranges
+    }
     // Nasdaq is daily-only. For the intraday ranges (1d → 5m, 5d → 15m) it would
     // return a handful of daily bars that the chart then renders as if they were
     // 5-minute candles — the "1D has fewer candles than 1M" bug. Only fall back
