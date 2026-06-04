@@ -5,12 +5,7 @@ import Link from "next/link";
 import { ArrowUpRight, RefreshCw, CandlestickChart } from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
-import type {
-  IChartApi,
-  ISeriesApi,
-  CandlestickData,
-  Time,
-} from "lightweight-charts";
+import CandleChart from "./_candle-chart";
 
 // ChartIt brand tokens — green = up, red = down (mirrors the bot's chart PNG).
 const UP = "#16c784";
@@ -118,6 +113,70 @@ function marketLabel(state: string | null) {
   }
 }
 
+// ── Candle-close countdown (TradingView-style) ───────────────────────────────
+function nowInET(): Date {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+}
+
+function intervalToMs(interval: string): number | null {
+  const m = interval.match(/^(\d+)m$/);
+  if (m) return parseInt(m[1], 10) * 60_000;
+  const h = interval.match(/^(\d+)h$/);
+  if (h) return parseInt(h[1], 10) * 3_600_000;
+  return null;
+}
+
+/** Milliseconds until the current candle closes, or null when not applicable. */
+function msUntilClose(d: ChartData, nowMs: number): number | null {
+  const last = d.candles[d.candles.length - 1];
+  if (!last) return null;
+
+  const stepMs = intervalToMs(d.interval);
+  if (stepMs != null) {
+    // Intraday: roll the fixed-width boundary forward from the last candle's
+    // open so the timer keeps ticking even if the 10s poll briefly lags.
+    let closeMs = last.time * 1000 + stepMs;
+    while (closeMs <= nowMs) closeMs += stepMs;
+    return closeMs - nowMs;
+  }
+
+  if (d.interval === "1d") {
+    const et = nowInET();
+    const close = new Date(et);
+    close.setHours(16, 0, 0, 0); // 4 PM ET (NYSE close)
+    const ms = close.getTime() - et.getTime();
+    return ms > 0 ? ms : null;
+  }
+
+  if (d.interval === "1wk") {
+    const et = nowInET();
+    const daysToFri = (5 - et.getDay() + 7) % 7; // 0 when today IS Friday
+    const close = new Date(et);
+    close.setDate(et.getDate() + daysToFri);
+    close.setHours(16, 0, 0, 0);
+    let ms = close.getTime() - et.getTime();
+    if (ms <= 0) {
+      close.setDate(close.getDate() + 7);
+      ms = close.getTime() - et.getTime();
+    }
+    return ms;
+  }
+
+  return null;
+}
+
+function fmtCountdown(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
 export default function LiveChart({
   symbol,
   initialRange,
@@ -132,12 +191,10 @@ export default function LiveChart({
   const [refreshing, setRefreshing] = React.useState(false);
   const [lastUpdate, setLastUpdate] = React.useState<Date | null>(null);
   const [priceFlash, setPriceFlash] = React.useState<"up" | "down" | null>(null);
-  // re-render the "updated Xs ago" label once per second
+  // re-render the "updated Xs ago" label + candle-close countdown once per second
   const [tickNow, setTickNow] = React.useState(() => Date.now());
 
-  const containerRef = React.useRef<HTMLDivElement | null>(null);
-  const chartRef = React.useRef<IChartApi | null>(null);
-  const seriesRef = React.useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const prevPriceRef = React.useRef<number | null>(null);
   const flashTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Fetch data on range change + on a refresh interval ─────────────────────
@@ -183,123 +240,11 @@ export default function LiveChart({
     return () => clearInterval(id);
   }, []);
 
-  // ── Create the lightweight-charts instance once, on mount ──────────────────
+  // ── Price flash on tick ────────────────────────────────────────────────────
+  // The CandleChart owns all rendering; here we only watch the price for the
+  // up/down color flash on the big quote number.
   React.useEffect(() => {
-    let disposed = false;
-    let resizeObserver: ResizeObserver | undefined;
-
-    (async () => {
-      const lwc = await import("lightweight-charts");
-      if (disposed || !containerRef.current) return;
-
-      const chart = lwc.createChart(containerRef.current, {
-        autoSize: true,
-        layout: {
-          background: { type: lwc.ColorType.Solid, color: "transparent" },
-          textColor: "rgba(255,255,255,0.5)",
-          fontSize: 12,
-          fontFamily:
-            "var(--font-mono), ui-monospace, SFMono-Regular, monospace",
-        },
-        grid: {
-          vertLines: { color: "rgba(255,255,255,0.04)" },
-          horzLines: { color: "rgba(255,255,255,0.05)" },
-        },
-        rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
-        timeScale: {
-          borderColor: "rgba(255,255,255,0.08)",
-          secondsVisible: false,
-          fixLeftEdge: true,
-          fixRightEdge: true,
-        },
-        crosshair: {
-          mode: lwc.CrosshairMode.Magnet,
-          vertLine: { color: "rgba(255,255,255,0.25)", labelBackgroundColor: "#27272a" },
-          horzLine: { color: "rgba(255,255,255,0.25)", labelBackgroundColor: "#27272a" },
-        },
-      });
-
-      const series = chart.addCandlestickSeries({
-        upColor: UP,
-        downColor: DOWN,
-        borderUpColor: UP,
-        borderDownColor: DOWN,
-        wickUpColor: UP,
-        wickDownColor: DOWN,
-      });
-
-      chartRef.current = chart;
-      seriesRef.current = series;
-
-      // Re-apply data already loaded before the chart finished mounting.
-      if (dataRef.current) applyData(dataRef.current, true);
-    })();
-
-    return () => {
-      disposed = true;
-      resizeObserver?.disconnect();
-      chartRef.current?.remove();
-      chartRef.current = null;
-      seriesRef.current = null;
-      // Force a fresh setData() on the next mount's empty series.
-      lastBarTimeRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Keep a ref to the latest data so the async chart-init can paint it.
-  const dataRef = React.useRef<ChartData | null>(null);
-  const prevPriceRef = React.useRef<number | null>(null);
-  // The last range we fit-to-content for. Pure polling ticks must NOT refit —
-  // that would visually jump the chart on every refresh.
-  const lastFitRangeRef = React.useRef<string | null>(null);
-  // Timestamp of the last bar handed to the series. Lets live ticks update only
-  // the forming candle via series.update() instead of replacing the whole set.
-  const lastBarTimeRef = React.useRef<number | null>(null);
-
-  const applyData = React.useCallback((d: ChartData, fit: boolean) => {
-    const series = seriesRef.current;
-    const chart = chartRef.current;
-    if (!series || !chart) return;
-
-    const intraday = d.interval.endsWith("m") || d.interval.endsWith("h");
-    chart.applyOptions({ timeScale: { timeVisible: intraday } });
-
-    const next: CandlestickData[] = d.candles.map((c) => ({
-      time: c.time as Time,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
-    if (next.length === 0) return;
-
-    // First paint / range change: bulk-load + fit once. setData is the correct
-    // call for a full dataset (TradingView pattern: setData for bulk, update for
-    // live). lastBarTimeRef === null also forces this path on a fresh series.
-    if (fit || lastBarTimeRef.current === null) {
-      series.setData(next);
-      chart.timeScale().fitContent();
-      lastBarTimeRef.current = next[next.length - 1].time as number;
-      return;
-    }
-
-    // Live tick: NEVER replace the whole series — that flickers and re-runs the
-    // price-scale autoscale every poll (the "terrible movement"). Only update
-    // the forming bar and append any genuinely new bars. update() requires
-    // non-decreasing times, so iterate from the last applied bar forward.
-    const lastApplied = lastBarTimeRef.current;
-    for (const bar of next) {
-      if ((bar.time as number) >= lastApplied) series.update(bar);
-    }
-    lastBarTimeRef.current = next[next.length - 1].time as number;
-  }, []);
-
-  React.useEffect(() => {
-    dataRef.current = data;
     if (!data) return;
-
-    // Detect a price tick → flash the price + change text for FLASH_MS.
     const prev = prevPriceRef.current;
     if (prev != null && data.price != null && prev !== data.price) {
       setPriceFlash(data.price > prev ? "up" : "down");
@@ -307,16 +252,17 @@ export default function LiveChart({
       flashTimerRef.current = setTimeout(() => setPriceFlash(null), FLASH_MS);
     }
     if (data.price != null) prevPriceRef.current = data.price;
-
-    // Fit only on first paint + range change; live ticks keep the view stable.
-    const fit = lastFitRangeRef.current !== data.range;
-    lastFitRangeRef.current = data.range;
-    applyData(data, fit);
-  }, [data, applyData]);
+  }, [data]);
 
   const up = (data?.change ?? 0) >= 0;
   const accent = up ? UP : DOWN;
   const market = marketLabel(data?.marketState ?? null);
+
+  // Candle-close countdown. Computed inline (re-derived each second via tickNow)
+  // and shown in a fixed chart corner — NO timeToCoordinate tracking, which kept
+  // forcing re-renders + autoscale churn against the chart's own pan/zoom.
+  const cdMs = data && market?.live ? msUntilClose(data, tickNow) : null;
+  const countdownText = cdMs != null ? fmtCountdown(cdMs) : null;
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -466,10 +412,26 @@ export default function LiveChart({
               boxShadow: `0 30px 80px -40px ${up ? UP_GLOW : "rgba(234,57,67,0.3)"}`,
             }}
           >
-            <div
-              ref={containerRef}
-              className="h-[320px] w-full sm:h-[420px]"
-            />
+            <div className="relative h-[320px] w-full sm:h-[420px]">
+              {data && (
+                <CandleChart
+                  candles={data.candles}
+                  interval={data.interval}
+                  currency={data.currency}
+                  range={data.range}
+                  className="absolute inset-0"
+                />
+              )}
+              {countdownText && (
+                <div
+                  className="pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-bold tabular-nums"
+                  style={{ background: "rgba(251,191,36,0.95)", color: "#111" }}
+                >
+                  <span className="opacity-70">CLOSE IN</span>
+                  {countdownText}
+                </div>
+              )}
+            </div>
 
             {/* Loading / error overlays */}
             {loading && !data && (
