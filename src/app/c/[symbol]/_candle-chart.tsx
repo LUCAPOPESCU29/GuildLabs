@@ -12,14 +12,26 @@ import * as React from "react";
 // the imperative machinery lives in one mount effect as plain closures; the data
 // effect reaches it through apiRef so React Compiler can reason about the rest.
 
-const UP = "#16c784";
-const DOWN = "#ea3943";
-const GRID = "rgba(255,255,255,0.05)";
-const GRID_SOFT = "rgba(255,255,255,0.035)";
-const AXIS_TEXT = "rgba(255,255,255,0.5)";
-const CROSS = "rgba(255,255,255,0.28)";
-const CHIP_BG = "#27272a";
+// Colours are not hard-coded: they're resolved from the FORGE design tokens
+// (globals.css) at runtime so the chart shares the site's exact palette and
+// reacts to light/dark theme switches. Up/down use the brand's signature
+// mint (`--success`) + coral (`--coral`) accent pair; chrome (grid, axis text,
+// crosshair chips) maps to the same surface/foreground/primary tokens the rest
+// of the UI uses. See `resolvePalette()` in the mount effect.
 const FONT = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, monospace";
+
+interface Palette {
+  up: string;
+  down: string;
+  grid: string;
+  gridSoft: string;
+  axisText: string;
+  cross: string;
+  chipBg: string;
+  chipText: string;
+  onColorText: string;
+  legendLabel: string;
+}
 
 // Plot insets: room for the right-hand price axis + bottom time axis.
 const PRICE_W = 60;
@@ -136,6 +148,46 @@ export default function CandleChart({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    // Resolve the FORGE design tokens to concrete sRGB colours. Canvas works in
+    // sRGB and serialises whatever you assign to fillStyle back as #rrggbb, so
+    // we round-trip each token (which may be authored in oklch) through it; that
+    // also lets us derive translucent variants as rgba(). Re-run on theme change.
+    const resolvePalette = (): Palette => {
+      const s = getComputedStyle(wrap);
+      const tok = (name: string, fallback: string) =>
+        s.getPropertyValue(name).trim() || fallback;
+      const hex = (color: string): string => {
+        ctx.fillStyle = "#000000";
+        ctx.fillStyle = color;
+        return typeof ctx.fillStyle === "string" ? ctx.fillStyle : "#000000";
+      };
+      const rgb = (color: string): [number, number, number] => {
+        const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex(color));
+        return m
+          ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)]
+          : [255, 255, 255];
+      };
+      const rgba = (color: string, a: number) => {
+        const [r, g, b] = rgb(color);
+        return `rgba(${r},${g},${b},${a})`;
+      };
+      const fg = tok("--foreground", "#ffffff");
+      const border = tok("--card-border", "#3a3a55");
+      return {
+        up: hex(tok("--success", "oklch(0.78 0.15 158)")),
+        down: hex(tok("--coral", "oklch(0.76 0.16 18)")),
+        grid: rgba(border, 0.55),
+        gridSoft: rgba(border, 0.3),
+        axisText: hex(tok("--muted-foreground", "rgba(255,255,255,0.6)")),
+        cross: rgba(fg, 0.38),
+        chipBg: hex(tok("--primary", "#6b73ff")),
+        chipText: hex(tok("--primary-foreground", "#0b0f1a")),
+        onColorText: hex(tok("--background-deep", "#0b0f18")),
+        legendLabel: rgba(fg, 0.5),
+      };
+    };
+    let pal = resolvePalette();
+
     const size = { w: 0, h: 0 };
     const crosshair = { x: 0, y: 0, on: false };
     const drag = { on: false, lastX: 0 };
@@ -221,13 +273,13 @@ export default function CandleChart({
       for (const p of priceTicks(lo, hi, 5)) {
         const y = yForPrice(p);
         if (y < L.top - 1 || y > L.bottom + 1) continue;
-        ctx.strokeStyle = GRID;
+        ctx.strokeStyle = pal.grid;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(L.left, Math.round(y) + 0.5);
         ctx.lineTo(L.right, Math.round(y) + 0.5);
         ctx.stroke();
-        ctx.fillStyle = AXIS_TEXT;
+        ctx.fillStyle = pal.axisText;
         ctx.fillText(fmtPrice(p), L.right + 6, y);
       }
 
@@ -244,13 +296,13 @@ export default function CandleChart({
         if (i % stride !== 0) continue;
         const x = xForIndex(i + 0.5);
         if (x < L.left || x > L.right) continue;
-        ctx.strokeStyle = GRID_SOFT;
+        ctx.strokeStyle = pal.gridSoft;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(Math.round(x) + 0.5, L.top);
         ctx.lineTo(Math.round(x) + 0.5, L.bottom);
         ctx.stroke();
-        ctx.fillStyle = AXIS_TEXT;
+        ctx.fillStyle = pal.axisText;
         ctx.fillText(fmtTimeLabel(cs[i].time, intra), x, L.bottom + TIME_H / 2 + 1);
       }
 
@@ -267,7 +319,7 @@ export default function CandleChart({
         const cx = xForIndex(i + 0.5);
         if (cx < L.left - bw || cx > L.right + bw) continue;
         const up = c.close >= c.open;
-        const color = up ? UP : DOWN;
+        const color = up ? pal.up : pal.down;
         ctx.strokeStyle = color;
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -286,7 +338,7 @@ export default function CandleChart({
         const lastC = cs[cs.length - 1];
         const ly = yForPrice(lastC.close);
         if (ly >= L.top && ly <= L.bottom) {
-          const col = lastC.close >= lastC.open ? UP : DOWN;
+          const col = lastC.close >= lastC.open ? pal.up : pal.down;
           ctx.save();
           ctx.strokeStyle = col;
           ctx.globalAlpha = 0.5;
@@ -299,9 +351,9 @@ export default function CandleChart({
           const label = fmtPrice(lastC.close);
           const tw = ctx.measureText(label).width;
           ctx.fillStyle = col;
-          roundRect(ctx, L.right + 2, ly - 9, Math.min(tw + 10, PRICE_W - 4), 18, 4);
+          roundRect(ctx, L.right + 2, ly - 9, Math.min(tw + 10, PRICE_W - 4), 18, 5);
           ctx.fill();
-          ctx.fillStyle = "#06140d";
+          ctx.fillStyle = pal.onColorText;
           ctx.textAlign = "left";
           ctx.fillText(label, L.right + 7, ly);
         }
@@ -314,7 +366,7 @@ export default function CandleChart({
         const snapX = hasBar ? xForIndex(idx + 0.5) : crosshair.x;
 
         ctx.save();
-        ctx.strokeStyle = CROSS;
+        ctx.strokeStyle = pal.cross;
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
         if (snapX >= L.left && snapX <= L.right) {
@@ -334,10 +386,10 @@ export default function CandleChart({
         if (crosshair.y >= L.top && crosshair.y <= L.bottom) {
           const plabel = fmtPrice(priceForY(crosshair.y));
           const tw = ctx.measureText(plabel).width;
-          ctx.fillStyle = CHIP_BG;
-          roundRect(ctx, L.right + 2, crosshair.y - 9, Math.min(tw + 10, PRICE_W - 4), 18, 4);
+          ctx.fillStyle = pal.chipBg;
+          roundRect(ctx, L.right + 2, crosshair.y - 9, Math.min(tw + 10, PRICE_W - 4), 18, 5);
           ctx.fill();
-          ctx.fillStyle = "#fff";
+          ctx.fillStyle = pal.chipText;
           ctx.textAlign = "left";
           ctx.fillText(plabel, L.right + 7, crosshair.y);
         }
@@ -345,10 +397,10 @@ export default function CandleChart({
           const tlabel = fmtTimeLabel(cs[idx].time, intra);
           const tw = ctx.measureText(tlabel).width;
           const cxp = Math.max(L.left + tw / 2 + 4, Math.min(snapX, L.right - tw / 2 - 4));
-          ctx.fillStyle = CHIP_BG;
-          roundRect(ctx, cxp - tw / 2 - 5, L.bottom + 2, tw + 10, 18, 4);
+          ctx.fillStyle = pal.chipBg;
+          roundRect(ctx, cxp - tw / 2 - 5, L.bottom + 2, tw + 10, 18, 5);
           ctx.fill();
-          ctx.fillStyle = "#fff";
+          ctx.fillStyle = pal.chipText;
           ctx.textAlign = "center";
           ctx.fillText(tlabel, cxp, L.bottom + 11);
         }
@@ -367,14 +419,14 @@ export default function CandleChart({
           let lx = L.left + 4;
           const ly = L.top + 9;
           for (const [k, val] of parts) {
-            ctx.fillStyle = "rgba(255,255,255,0.45)";
+            ctx.fillStyle = pal.legendLabel;
             ctx.fillText(k, lx, ly);
             lx += ctx.measureText(k).width + 4;
-            ctx.fillStyle = up ? UP : DOWN;
+            ctx.fillStyle = up ? pal.up : pal.down;
             ctx.fillText(val, lx, ly);
             lx += ctx.measureText(val).width + 12;
           }
-          ctx.fillStyle = up ? UP : DOWN;
+          ctx.fillStyle = up ? pal.up : pal.down;
           ctx.fillText(`${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`, lx, ly);
         }
       }
@@ -408,6 +460,17 @@ export default function CandleChart({
 
     const ro = new ResizeObserver(applySize);
     ro.observe(wrap);
+
+    // Recolour when the site theme toggles (next-themes flips the `.dark` class
+    // / color-scheme on <html>), so the canvas tracks light/dark like the DOM.
+    const themeObs = new MutationObserver(() => {
+      pal = resolvePalette();
+      schedule();
+    });
+    themeObs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme"],
+    });
 
     const rect = () => canvas.getBoundingClientRect();
     const relX = (clientX: number) => clientX - rect().left;
@@ -508,6 +571,7 @@ export default function CandleChart({
     return () => {
       apiRef.current = null;
       ro.disconnect();
+      themeObs.disconnect();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", endPointer);

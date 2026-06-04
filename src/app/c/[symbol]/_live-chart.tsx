@@ -7,10 +7,13 @@ import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
 import CandleChart from "./_candle-chart";
 
-// ChartIt brand tokens — green = up, red = down (mirrors the bot's chart PNG).
-const UP = "#16c784";
-const DOWN = "#ea3943";
-const UP_GLOW = "rgba(22,199,132,0.35)";
+// Up/down map to the FORGE design system's signature accent pair — mint
+// (`--success`) for gains, coral (`--coral`) for losses — so the chart page
+// shares the rest of the site's palette and theme (light/dark) automatically.
+const UP = "var(--success)";
+const DOWN = "var(--coral)";
+const UP_GLOW = "color-mix(in oklab, var(--success) 38%, transparent)";
+const DOWN_GLOW = "color-mix(in oklab, var(--coral) 32%, transparent)";
 
 const CHARTIT_CLIENT_ID = "1511281770820145182";
 const INVITE_URL = `https://discord.com/oauth2/authorize?client_id=${CHARTIT_CLIENT_ID}&permissions=274877992960&scope=bot+applications.commands`;
@@ -291,7 +294,7 @@ export default function LiveChart({
           className="pointer-events-none absolute inset-x-0 top-0 h-64"
           style={{
             background: `radial-gradient(60% 100% at 50% 0%, ${
-              up ? UP_GLOW : "rgba(234,57,67,0.25)"
+              up ? UP_GLOW : DOWN_GLOW
             }, transparent 70%)`,
             opacity: 0.35,
           }}
@@ -314,8 +317,8 @@ export default function LiveChart({
                     className="ml-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest"
                     style={
                       market.live
-                        ? { background: "rgba(22,199,132,0.15)", color: UP }
-                        : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)" }
+                        ? { background: "color-mix(in oklab, var(--success) 16%, transparent)", color: UP }
+                        : { background: "var(--muted)", color: "var(--muted-foreground)" }
                     }
                   >
                     <span
@@ -327,7 +330,7 @@ export default function LiveChart({
                               boxShadow: `0 0 0 0 ${UP}`,
                               animation: "pulse-glow 1.6s ease-in-out infinite",
                             }
-                          : { background: "rgba(255,255,255,0.4)" }
+                          : { background: "var(--muted-foreground)" }
                       }
                     />
                     {market.live ? "LIVE" : market.text}
@@ -405,11 +408,9 @@ export default function LiveChart({
 
           {/* ── Chart card ────────────────────────────────────────────────── */}
           <div
-            className="relative mt-4 overflow-hidden rounded-3xl border p-3 sm:p-4"
+            className="relative mt-4 overflow-hidden rounded-3xl border border-card-border bg-card p-3 sm:p-4"
             style={{
-              background: "#0a0a0c",
-              borderColor: "rgba(255,255,255,0.08)",
-              boxShadow: `0 30px 80px -40px ${up ? UP_GLOW : "rgba(234,57,67,0.3)"}`,
+              boxShadow: `var(--card-shadow), 0 40px 90px -50px ${up ? UP_GLOW : DOWN_GLOW}`,
             }}
           >
             <div className="relative h-[320px] w-full sm:h-[420px]">
@@ -424,31 +425,35 @@ export default function LiveChart({
               )}
               {countdownText && (
                 <div
-                  className="pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-bold tabular-nums"
-                  style={{ background: "rgba(251,191,36,0.95)", color: "#111" }}
+                  className="pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full border border-card-border px-2.5 py-1 font-mono text-[10px] font-bold tabular-nums text-foreground"
+                  style={{
+                    background: "color-mix(in oklab, var(--card) 78%, transparent)",
+                    backdropFilter: "blur(8px)",
+                    WebkitBackdropFilter: "blur(8px)",
+                  }}
                 >
-                  <span className="opacity-70">CLOSE IN</span>
-                  {countdownText}
+                  <span className="text-muted-foreground">CLOSE IN</span>
+                  <span style={{ color: "var(--accent)" }}>{countdownText}</span>
                 </div>
               )}
             </div>
 
             {/* Loading / error overlays */}
             {loading && !data && (
-              <div className="absolute inset-0 grid place-items-center bg-[#0a0a0c]">
-                <div className="flex flex-col items-center gap-3 text-white/50">
+              <div className="absolute inset-0 grid place-items-center bg-card">
+                <div className="flex flex-col items-center gap-3 text-muted-foreground">
                   <RefreshCw className="size-6 animate-spin" style={{ color: UP }} />
                   <span className="font-mono text-xs">Loading {symbol}…</span>
                 </div>
               </div>
             )}
             {error && !data && (
-              <div className="absolute inset-0 grid place-items-center bg-[#0a0a0c] px-6 text-center">
+              <div className="absolute inset-0 grid place-items-center bg-card px-6 text-center">
                 <div className="max-w-sm">
-                  <div className="font-display text-lg font-bold text-white">
+                  <div className="font-display text-lg font-bold text-foreground">
                     Couldn&apos;t load that chart
                   </div>
-                  <p className="mt-2 text-sm text-white/55">{error}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">{error}</p>
                   <button
                     onClick={() => load(range, false)}
                     className="mt-4 inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-xs font-bold text-black"
