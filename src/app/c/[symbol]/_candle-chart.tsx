@@ -419,6 +419,14 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     const pointers = new Map<number, { x: number; y: number }>();
     let pinchDist: number | null = null;
     let raf: number | null = null;
+    // Eased zoom: wheel/reset set a target viewport; the rAF step lerps toward it.
+    let viewTarget: View | null = null;
+    // Auto-thin: when bars get too narrow we draw a close line instead of bodies.
+    // Hysteresis (separate enter/exit thresholds) stops it flickering while zooming.
+    let thinMode = false;
+    // Low-rate repaint so the last-price marker can gently breathe.
+    let pulseRaf: number | null = null;
+    let lastPulseTs = 0;
 
     const intraday = () =>
       intervalRef.current.endsWith("m") || intervalRef.current.endsWith("h");
@@ -563,12 +571,14 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           ? `${(p / pctBase - 1) * 100 >= 0 ? "+" : ""}${((p / pctBase - 1) * 100).toFixed(2)}%`
           : fmtPrice(p);
 
-      // price grid + right-axis labels
+      // price grid + right-axis labels (alternating major/minor for a calmer grid)
       ctx.textAlign = "left";
-      for (const p of priceTicks(lo, hi, 5)) {
+      const ticks = priceTicks(lo, hi, 5);
+      for (let ti = 0; ti < ticks.length; ti++) {
+        const p = ticks[ti];
         const y = yForPrice(p);
         if (y < L.priceTop - 1 || y > L.priceBottom + 1) continue;
-        ctx.strokeStyle = pal.grid;
+        ctx.strokeStyle = ti % 2 === 0 ? pal.grid : pal.gridSoft;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(L.left, Math.round(y) + 0.5);
@@ -603,6 +613,23 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
 
       const drawFrom = Math.max(0, Math.floor(v.from) - 1);
       const drawTo = Math.min(cs.length - 1, Math.ceil(v.to) + 1);
+
+      // Auto-thin hysteresis: enter line-mode under 2.2px/bar, exit above 3.2px.
+      if (!thinMode && bw < 2.2) thinMode = true;
+      else if (thinMode && bw > 3.2) thinMode = false;
+
+      // ── hovered-candle column tint (behind everything) ──
+      if (crosshair.on && !drag.on && !measure.on) {
+        const hIdx = Math.floor(indexForX(crosshair.x));
+        if (hIdx >= 0 && hIdx < cs.length) {
+          const colLeft = xForIndex(hIdx);
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          ctx.fillStyle = pal.gridSoft;
+          ctx.fillRect(colLeft, L.top, Math.max(1, bw), L.bottom - L.top);
+          ctx.restore();
+        }
+      }
 
       // ── volume band (drawn first so price sits on top) ──
       if (L.volH > 0 && cs.length > 0) {
@@ -864,6 +891,26 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           ctx.lineJoin = "round";
           ctx.stroke();
         }
+      } else if (thinMode) {
+        // too dense for bodies — draw a 1px close line tinted by visible direction
+        const src = ct === "heikin" ? computeHeikinAshi(cs) : cs;
+        const vf = src[Math.max(0, Math.min(src.length - 1, Math.floor(v.from < 0 ? 0 : v.from)))];
+        const vl = src[Math.min(src.length - 1, Math.max(0, Math.ceil(v.to) - 1))];
+        const rising = !!vf && !!vl && vl.close >= vf.close;
+        ctx.strokeStyle = rising ? pal.up : pal.down;
+        ctx.lineWidth = 1;
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        let started = false;
+        for (let i = drawFrom; i <= drawTo; i++) {
+          const x = xForIndex(i + 0.5);
+          const y = yForPrice(src[i].close);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
       } else {
         // candle-like: candles | hollow | heikin (HA uses a transformed series,
         // but the crosshair legend below still reads the real OHLC from `cs`).
@@ -990,21 +1037,38 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       }
       ctx.restore();
 
-      // last-price dashed line + axis chip (subtle "live" cue)
+      // last-price dashed line + breathing dot + axis chip (subtle "live" cue)
       if (cs.length > 0) {
         const lastC = cs[cs.length - 1];
         const ly = yForPrice(lastC.close);
+        // 0..1 sine over ~1.5s; drives the gentle pulse
+        const breathe = 0.5 + 0.5 * Math.sin(performance.now() / 700);
         if (ly >= L.priceTop && ly <= L.priceBottom) {
           const col = lastC.close >= lastC.open ? pal.up : pal.down;
           ctx.save();
           ctx.strokeStyle = col;
-          ctx.globalAlpha = 0.5;
+          ctx.globalAlpha = 0.3 + 0.3 * breathe;
           ctx.setLineDash([3, 3]);
           ctx.beginPath();
           ctx.moveTo(L.left, Math.round(ly) + 0.5);
           ctx.lineTo(L.right, Math.round(ly) + 0.5);
           ctx.stroke();
           ctx.restore();
+          // pulsing dot at the latest close
+          const lastX = xForIndex(cs.length - 1 + 0.5);
+          if (lastX >= L.left && lastX <= L.right) {
+            ctx.save();
+            ctx.fillStyle = col;
+            ctx.globalAlpha = 0.16 + 0.24 * breathe;
+            ctx.beginPath();
+            ctx.arc(lastX, ly, 7, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.arc(lastX, ly, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
           const label = fmtAxis(lastC.close);
           const tw = ctx.measureText(label).width;
           ctx.fillStyle = col;
@@ -1184,8 +1248,27 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       if (raf != null) return;
       raf = requestAnimationFrame(() => {
         raf = null;
+        if (viewTarget) {
+          const v = viewRef.current;
+          const t = viewTarget;
+          const nf = v.from + (t.from - v.from) * 0.25;
+          const nt = v.to + (t.to - v.to) * 0.25;
+          if (Math.abs(nf - t.from) < 0.02 && Math.abs(nt - t.to) < 0.02) {
+            viewRef.current = { from: t.from, to: t.to };
+            viewTarget = null;
+          } else {
+            viewRef.current = { from: nf, to: nt };
+            schedule(); // keep easing
+          }
+        }
         draw();
       });
+    };
+
+    // Ease the viewport toward a target span (used by wheel zoom + reset).
+    const animateTo = (target: View) => {
+      viewTarget = target;
+      schedule();
     };
 
     const applySize = () => {
@@ -1202,8 +1285,12 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     };
 
     const reset = () => {
+      // ease from the current view to the fit target
+      const cur = { ...viewRef.current };
       fit();
-      schedule();
+      const target = { ...viewRef.current };
+      viewRef.current = cur;
+      animateTo(target);
     };
 
     // Download the current chart as a PNG. The canvas is already backed at
@@ -1229,6 +1316,17 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     if (candlesRef.current.length > 0 && rangeRef.current === null) fit();
     applySize();
 
+    // Low-rate (~15fps) repaint so the last-price marker breathes; paused when the
+    // tab is hidden so backgrounded charts cost nothing.
+    const pulseLoop = (ts: number) => {
+      pulseRaf = requestAnimationFrame(pulseLoop);
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (ts - lastPulseTs < 66) return;
+      lastPulseTs = ts;
+      schedule();
+    };
+    pulseRaf = requestAnimationFrame(pulseLoop);
+
     const ro = new ResizeObserver(applySize);
     ro.observe(wrap);
 
@@ -1249,6 +1347,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
 
     const onPointerDown = (e: PointerEvent) => {
       canvas.setPointerCapture(e.pointerId);
+      viewTarget = null; // any direct interaction cancels an in-flight zoom ease
       const px = relX(e.clientX);
       const py = relY(e.clientY);
       pointers.set(e.pointerId, { x: px, y: py });
@@ -1343,18 +1442,19 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const x = relX(e.clientX);
-      const v = viewRef.current;
       const L = layout();
-      const sp = v.to - v.from;
-      const anchor = v.from + ((x - L.left) / L.plotW) * sp;
+      // Zoom about the cursor, compounding off the pending target so rapid wheel
+      // ticks accumulate smoothly into one eased motion.
+      const base = viewTarget ?? viewRef.current;
+      const sp = base.to - base.from;
+      const anchor = base.from + ((x - L.left) / L.plotW) * sp;
       let factor = e.deltaY > 0 ? 1.1 : 1 / 1.1; // down = zoom out
       let newSpan = sp * factor;
       const maxSpan = Math.max(20, candlesRef.current.length * 4);
       newSpan = Math.min(Math.max(newSpan, 3), maxSpan);
       factor = newSpan / sp;
-      v.from = anchor - (anchor - v.from) * factor;
-      v.to = v.from + newSpan;
-      schedule();
+      const from = anchor - (anchor - base.from) * factor;
+      animateTo({ from, to: from + newSpan });
     };
 
     const onDblClick = (e: MouseEvent) => {
@@ -1382,6 +1482,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("dblclick", onDblClick);
       if (raf != null) cancelAnimationFrame(raf);
+      if (pulseRaf != null) cancelAnimationFrame(pulseRaf);
     };
   }, []);
 
