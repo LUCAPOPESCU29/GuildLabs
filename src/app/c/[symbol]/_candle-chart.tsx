@@ -104,14 +104,32 @@ export type DrawTool =
   | "ray"
   | "arrow"
   | "text"
+  | "long"
+  | "short"
+  | "channel"
   | "erase";
 interface Drawing {
   id: string;
-  type: "hline" | "trend" | "fib" | "avwap" | "vline" | "rect" | "ray" | "arrow" | "text";
-  points: Array<{ t: number; p: number }>; // hline/vline/avwap/text: 1 point; others: 2
+  type:
+    | "hline"
+    | "trend"
+    | "fib"
+    | "avwap"
+    | "vline"
+    | "rect"
+    | "ray"
+    | "arrow"
+    | "text"
+    | "long"
+    | "short"
+    | "channel";
+  // hline/vline/avwap/text: 1 pt; trend/fib/ray/arrow/rect: 2; long/short: 3
+  // (entry,stop,target); channel: 3 (base a, base b, offset)
+  points: Array<{ t: number; p: number }>;
   color?: string;
   text?: string; // for the text annotation
 }
+const POSITION_NOTIONAL = 1000; // $ used for position-tool P/L estimates
 let _drawSeq = 0;
 function genDrawId(): string {
   _drawSeq += 1;
@@ -914,6 +932,22 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             (inX && (Math.abs(y - y1) <= tol || Math.abs(y - y2) <= tol)) ||
             (inY && (Math.abs(x - x1) <= tol || Math.abs(x - x2) <= tol));
           if (nearEdge) return d.id;
+        } else if ((d.type === "long" || d.type === "short") && d.points.length === 3) {
+          const ex = timeToXc(d.points[0].t);
+          if (x >= ex - tol) {
+            for (const pt of d.points) {
+              if (Math.abs(y - priceToY(pt.p)) <= tol) return d.id;
+            }
+          }
+        } else if (d.type === "channel" && d.points.length === 3) {
+          const dx = d.points[1].t - d.points[0].t;
+          const slope = dx !== 0 ? (d.points[1].p - d.points[0].p) / dx : 0;
+          const baseAt = (t: number) => d.points[0].p + slope * (t - d.points[0].t);
+          const offset = d.points[2].p - baseAt(d.points[2].t);
+          const t = xToTime(x);
+          const yBase = priceToY(baseAt(t));
+          const yOff = priceToY(baseAt(t) + offset);
+          if (Math.abs(y - yBase) <= tol || Math.abs(y - yOff) <= tol) return d.id;
         }
       }
       return null;
@@ -1973,6 +2007,83 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             ctx.fillStyle = pal.legendLabel;
             ctx.textAlign = "left";
             ctx.fillText(`${fmtPrice(hiP - loP)}  ${pct.toFixed(2)}%`, rx + 4, ry - 5);
+          } else if ((d.type === "long" || d.type === "short") && d.points.length === 3) {
+            const entry = d.points[0].p;
+            const stop = d.points[1].p;
+            const target = d.points[2].p;
+            const ex = timeToXc(d.points[0].t);
+            const yE = priceToY(entry);
+            const yS = priceToY(stop);
+            const yT = priceToY(target);
+            // profit zone (entry↔target) up-tinted, loss zone (entry↔stop) down-tinted
+            ctx.fillStyle = toRgba(pal.up, 0.12);
+            ctx.fillRect(ex, Math.min(yE, yT), L.right - ex, Math.abs(yT - yE));
+            ctx.fillStyle = toRgba(pal.down, 0.12);
+            ctx.fillRect(ex, Math.min(yE, yS), L.right - ex, Math.abs(yS - yE));
+            // lines
+            for (const [yy, c2] of [
+              [yE, col],
+              [yT, pal.up],
+              [yS, pal.down],
+            ] as const) {
+              ctx.strokeStyle = c2;
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(ex, Math.round(yy) + 0.5);
+              ctx.lineTo(L.right, Math.round(yy) + 0.5);
+              ctx.stroke();
+            }
+            // stats label
+            const risk = Math.abs(entry - stop);
+            const rr = risk ? Math.abs(target - entry) / risk : 0;
+            const shares = entry ? POSITION_NOTIONAL / entry : 0;
+            const sign = d.type === "long" ? 1 : -1;
+            const pnlT = shares * (target - entry) * sign;
+            const pnlS = shares * (stop - entry) * sign;
+            const dT = entry ? (target / entry - 1) * 100 : 0;
+            const dS = entry ? (stop / entry - 1) * 100 : 0;
+            ctx.fillStyle = pal.legendLabel;
+            ctx.textAlign = "left";
+            ctx.fillText(`${d.type.toUpperCase()}  R:R ${rr.toFixed(2)}`, ex + 4, Math.min(yE, yT) - 16);
+            ctx.fillStyle = pal.up;
+            ctx.fillText(`T ${target ? fmtPrice(target) : ""}  ${dT >= 0 ? "+" : ""}${dT.toFixed(2)}%  ${pnlT >= 0 ? "+" : ""}$${Math.abs(pnlT).toFixed(0)}`, ex + 4, yT - 4);
+            ctx.fillStyle = pal.down;
+            ctx.fillText(`S ${stop ? fmtPrice(stop) : ""}  ${dS >= 0 ? "+" : ""}${dS.toFixed(2)}%  ${pnlS >= 0 ? "+" : ""}$${Math.abs(pnlS).toFixed(0)}`, ex + 4, yS + 12);
+          } else if (d.type === "channel" && d.points.length === 3) {
+            const x1 = timeToXc(d.points[0].t);
+            const x2 = timeToXc(d.points[1].t);
+            const p1 = d.points[0].p;
+            const p2 = d.points[1].p;
+            const dx = d.points[1].t - d.points[0].t;
+            const slope = dx !== 0 ? (p2 - p1) / dx : 0;
+            const baseAt = (t: number) => p1 + slope * (t - d.points[0].t);
+            // price offset of the 3rd point from the base line
+            const offset = d.points[2].p - baseAt(d.points[2].t);
+            // draw both lines to the right edge
+            const tR = cs[Math.min(cs.length - 1, Math.ceil(v.to))]?.time ?? cs[cs.length - 1].time;
+            const yBase1 = priceToY(p1);
+            const yBaseR = priceToY(baseAt(tR));
+            const yOff1 = priceToY(p1 + offset);
+            const yOffR = priceToY(baseAt(tR) + offset);
+            const xR = timeToXc(tR);
+            // fill between
+            ctx.fillStyle = toRgba(col, 0.08);
+            ctx.beginPath();
+            ctx.moveTo(x1, yBase1);
+            ctx.lineTo(xR, yBaseR);
+            ctx.lineTo(xR, yOffR);
+            ctx.lineTo(x1, yOff1);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = col;
+            ctx.lineWidth = sel ? 2.5 : 1.5;
+            ctx.beginPath();
+            ctx.moveTo(x1, yBase1);
+            ctx.lineTo(xR, yBaseR);
+            ctx.moveTo(x1, yOff1);
+            ctx.lineTo(xR, yOffR);
+            ctx.stroke();
+            void x2;
           } else if (d.type === "fib" && d.points.length === 2) {
             const x1 = timeToXc(d.points[0].t);
             const x2 = timeToXc(d.points[1].t);
@@ -2583,7 +2694,27 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           schedule();
           return;
         }
-        // two-click tools: trend, fib, ray, arrow, rect — snapped to pivots/OHLC
+        // position tools: 1 click = entry; stop/target auto-seeded, then dragged
+        if (dt === "long" || dt === "short") {
+          const e = placePoint(px, py, false);
+          const entry = e.p;
+          const tgt = dt === "long" ? entry * 1.03 : entry * 0.97;
+          const stp = dt === "long" ? entry * 0.97 : entry * 1.03;
+          drawings.push({
+            id: genDrawId(),
+            type: dt,
+            points: [
+              { t: e.t, p: entry },
+              { t: e.t, p: stp },
+              { t: e.t, p: tgt },
+            ],
+          });
+          saveDrawings();
+          schedule();
+          return;
+        }
+        // multi-click tools: trend/fib/ray/arrow/rect (2), channel (3)
+        const needed = dt === "channel" ? 3 : 2;
         const snapped = placePoint(px, py, true);
         if (!pending) {
           pending = { type: dt as Drawing["type"], points: [snapped] };
@@ -2591,9 +2722,11 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           pendingCursor.y = py;
         } else {
           pending.points.push(snapped);
-          drawings.push({ id: genDrawId(), type: pending.type, points: pending.points });
-          pending = null;
-          saveDrawings();
+          if (pending.points.length >= needed) {
+            drawings.push({ id: genDrawId(), type: pending.type, points: pending.points });
+            pending = null;
+            saveDrawings();
+          }
         }
         schedule();
         return;
@@ -2688,6 +2821,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
               t: xToTime(timeToXc(pt.t) + dx),
               p: yToPrice(priceToY(pt.p) + dy),
             }));
+          } else if (d.type === "long" || d.type === "short") {
+            // position handles move vertically only (keep the entry time)
+            d.points[editDrag.handle] = { t: d.points[editDrag.handle].t, p: yToPrice(y) };
           } else {
             d.points[editDrag.handle] = { t: xToTime(x), p: yToPrice(y) };
           }
@@ -3009,6 +3145,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             ["rect", "▭", "Rectangle / zone"],
             ["vline", "│", "Vertical line"],
             ["fib", "≣", "Fibonacci"],
+            ["channel", "▱", "Parallel channel"],
+            ["long", "L↑", "Long position (risk/reward)"],
+            ["short", "S↓", "Short position (risk/reward)"],
             ["avwap", "⩒", "Anchored VWAP"],
             ["text", "T", "Text note"],
             ["erase", "⌫", "Erase (click a drawing)"],
