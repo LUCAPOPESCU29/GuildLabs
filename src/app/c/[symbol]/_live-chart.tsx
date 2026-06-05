@@ -16,6 +16,11 @@ import {
   Maximize2,
   Minimize2,
   Settings2,
+  Play,
+  Pause,
+  ChevronLeft,
+  ChevronRight,
+  X,
 } from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
@@ -463,6 +468,10 @@ export default function LiveChart({
   const [showSettings, setShowSettings] = React.useState(false);
   const [dataWindow, setDataWindow] = React.useState(false);
   const [showHelp, setShowHelp] = React.useState(false);
+  const [replay, setReplay] = React.useState(false);
+  const [replayIdx, setReplayIdx] = React.useState(0);
+  const [replayPlaying, setReplayPlaying] = React.useState(false);
+  const [replaySpeed, setReplaySpeed] = React.useState(1);
   const [maInput, setMaInput] = React.useState("");
   const [emaInput, setEmaInput] = React.useState("");
   const [searchValue, setSearchValue] = React.useState("");
@@ -615,6 +624,34 @@ export default function LiveChart({
     const id = setInterval(() => setTickNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // ── Replay controls ──
+  const candleCount = data?.candles.length ?? 0;
+  const enterReplay = React.useCallback(() => {
+    const n = data?.candles.length ?? 0;
+    if (n < 2) return;
+    setReplayIdx(Math.max(1, Math.floor(n * 0.6)));
+    setReplay(true);
+    setReplayPlaying(false);
+  }, [data?.candles.length]);
+  const exitReplay = React.useCallback(() => {
+    setReplay(false);
+    setReplayPlaying(false);
+  }, []);
+  React.useEffect(() => {
+    if (!replay || !replayPlaying) return;
+    const n = data?.candles.length ?? 0;
+    const id = setInterval(() => {
+      setReplayIdx((i) => {
+        if (i >= n - 1) {
+          setReplayPlaying(false);
+          return i;
+        }
+        return i + 1;
+      });
+    }, 1000 / replaySpeed);
+    return () => clearInterval(id);
+  }, [replay, replayPlaying, replaySpeed, data?.candles.length]);
 
   // ── Apply persisted/URL prefs once, client-side after mount ────────────────
   // Initial render uses the deterministic defaults (so SSR and hydration match),
@@ -1234,6 +1271,22 @@ export default function LiveChart({
                 ?
               </button>
 
+              {/* Replay mode */}
+              <button
+                onClick={() => (replay ? exitReplay() : enterReplay())}
+                className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                style={
+                  replay
+                    ? { background: UP, color: "#000", borderColor: "transparent" }
+                    : { background: "var(--card)", color: "var(--muted-foreground)", borderColor: "var(--card-border)" }
+                }
+                aria-pressed={replay}
+                title="Bar replay"
+              >
+                <Play className="size-3.5" />
+                Replay
+              </button>
+
               {/* Compare overlay ticker */}
               <form
                 onSubmit={onCompareSubmit}
@@ -1325,6 +1378,8 @@ export default function LiveChart({
                   vwap={vwap}
                   volumeProfile={volumeProfile}
                   dataWindow={dataWindow}
+                  replayIndex={replay ? Math.min(replayIdx, data.candles.length - 1) : null}
+                  onExitReplay={exitReplay}
                   onToggleDataWindow={() => setDataWindow((s) => !s)}
                   onToggleHelp={() => setShowHelp((s) => !s)}
                   displayStartTime={data.displayStartTime}
@@ -1415,6 +1470,81 @@ export default function LiveChart({
               </div>
             )}
           </div>
+
+          {/* ── Replay control bar ───────────────────────────────────────── */}
+          {replay && data && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-card-border bg-card px-3 py-2">
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest"
+                style={{ background: "color-mix(in oklab, var(--success) 16%, transparent)", color: UP }}
+              >
+                Replay
+              </span>
+              <button
+                onClick={() => setReplayPlaying((p) => !p)}
+                className="flex h-7 w-7 items-center justify-center rounded-full text-black"
+                style={{ background: UP }}
+                title={replayPlaying ? "Pause" : "Play"}
+              >
+                {replayPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+              </button>
+              <button
+                onClick={() => setReplayIdx((i) => Math.max(1, i - 1))}
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-card-border text-muted-foreground hover:text-foreground"
+                title="Step back"
+              >
+                <ChevronLeft className="size-3.5" />
+              </button>
+              <button
+                onClick={() => setReplayIdx((i) => Math.min(candleCount - 1, i + 1))}
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-card-border text-muted-foreground hover:text-foreground"
+                title="Step forward"
+              >
+                <ChevronRight className="size-3.5" />
+              </button>
+              <input
+                type="range"
+                min={1}
+                max={Math.max(1, candleCount - 1)}
+                value={Math.min(replayIdx, candleCount - 1)}
+                onChange={(e) => setReplayIdx(Number(e.target.value))}
+                className="h-1 flex-1 min-w-32 accent-[var(--success)]"
+                aria-label="Replay position"
+              />
+              <div className="inline-flex overflow-hidden rounded-full border border-card-border">
+                {[1, 2, 4].map((sp) => (
+                  <button
+                    key={sp}
+                    onClick={() => setReplaySpeed(sp)}
+                    className="px-2 py-1 font-mono text-[10px] font-bold"
+                    style={
+                      replaySpeed === sp
+                        ? { background: UP, color: "#000" }
+                        : { color: "var(--muted-foreground)" }
+                    }
+                  >
+                    {sp}×
+                  </button>
+                ))}
+              </div>
+              <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                {data.candles[Math.min(replayIdx, candleCount - 1)]
+                  ? new Date(data.candles[Math.min(replayIdx, candleCount - 1)].time * 1000).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })
+                  : ""}
+              </span>
+              <button
+                onClick={exitReplay}
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-card-border text-muted-foreground hover:text-foreground"
+                title="Exit replay (Esc)"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* ── Stat strip ────────────────────────────────────────────────── */}
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">

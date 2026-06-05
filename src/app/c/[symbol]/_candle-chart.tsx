@@ -170,6 +170,8 @@ interface CandleChartProps {
   vwap?: boolean; // session VWAP overlay on price
   volumeProfile?: boolean; // volume-at-price histogram on the right edge
   dataWindow?: boolean; // on-chart OHLC + indicator readout panel
+  replayIndex?: number | null; // when set, render the series only up to this bar
+  onExitReplay?: () => void; // invoked by Esc while replaying
   onToggleFullscreen?: () => void; // invoked by the "F" shortcut
   onToggleDataWindow?: () => void; // invoked by the "D" shortcut
   onToggleHelp?: () => void; // invoked by the "?" shortcut
@@ -506,6 +508,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     vwap = false,
     volumeProfile = false,
     dataWindow = false,
+    replayIndex = null,
+    onExitReplay,
     onToggleFullscreen,
     onToggleDataWindow,
     onToggleHelp,
@@ -557,11 +561,14 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const vwapRef = React.useRef(vwap);
   const volProfileRef = React.useRef(volumeProfile);
   const dataWindowRef = React.useRef(dataWindow);
+  const replayIndexRef = React.useRef<number | null>(replayIndex ?? null);
+  const onExitReplayRef = React.useRef(onExitReplay);
   const onFsRef = React.useRef(onToggleFullscreen);
   const onDataWindowRef = React.useRef(onToggleDataWindow);
   const onHelpRef = React.useRef(onToggleHelp);
   const displayStartRef = React.useRef<number | undefined>(displayStartTime);
   const lastPriceRef = React.useRef<number | null>(null);
+  const prevReplayActiveRef = React.useRef(false);
 
   // Bridge to the mount-effect closures so the data effect can drive a repaint.
   const apiRef = React.useRef<{
@@ -1057,9 +1064,25 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       return swing ? snapPoint(px, py) : { t: xToTime(px), p: yToPrice(py) };
     };
 
+    // Effective candle array — full series live, or sliced to the replay playhead.
+    // All our indicators are causal, so a value at index ≤ playhead is identical
+    // whether computed over the slice or the full array; slicing also clamps every
+    // length-based loop in draw() so future bars simply don't appear.
+    let replayCache: { full: Candle[]; ri: number; arr: Candle[] } | null = null;
+    const effCandles = (): Candle[] => {
+      const full = candlesRef.current;
+      const ri = replayIndexRef.current;
+      if (ri == null) return full;
+      const i = Math.max(0, Math.min(full.length - 1, ri));
+      if (replayCache && replayCache.full === full && replayCache.ri === i) return replayCache.arr;
+      const arr = full.slice(0, i + 1);
+      replayCache = { full, ri: i, arr };
+      return arr;
+    };
+
     const priceRange = () => {
       if (manualScale) return manualScale; // user-locked vertical scale
-      const cs = candlesRef.current;
+      const cs = effCandles();
       const v = viewRef.current;
       let lo = Infinity;
       let hi = -Infinity;
@@ -1081,7 +1104,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     };
 
     const fit = () => {
-      const cs = candlesRef.current;
+      const cs = effCandles();
       const len = cs.length;
       if (len === 0) return;
       // Start the view at the first candle the user asked to see; bars before it
@@ -1101,7 +1124,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     // ── The single source of pixels ──
     const draw = () => {
       const L = layout();
-      const cs = candlesRef.current;
+      const cs = effCandles();
       if (L.w === 0 || L.h === 0) return;
 
       ctx.clearRect(0, 0, L.w, L.h);
@@ -3227,7 +3250,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           }
           break;
         case "Escape":
-          if (pending) {
+          if (replayIndexRef.current != null) {
+            onExitReplayRef.current?.();
+          } else if (pending) {
             pending = null;
             schedule();
           } else if (selectedId) {
@@ -3290,6 +3315,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     vwapRef.current = vwap;
     volProfileRef.current = volumeProfile;
     dataWindowRef.current = dataWindow;
+    replayIndexRef.current = replayIndex ?? null;
+    onExitReplayRef.current = onExitReplay;
     onFsRef.current = onToggleFullscreen;
     onDataWindowRef.current = onToggleDataWindow;
     onHelpRef.current = onToggleHelp;
@@ -3321,12 +3348,20 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       }
     }
     prevLenRef.current = candles.length;
-    // edge-trigger price alerts on the latest close
-    const newPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
-    api?.checkAlerts(lastPriceRef.current, newPrice);
-    lastPriceRef.current = newPrice;
+    // re-fit when entering/leaving replay so the view ends at the playhead
+    const replayActive = (replayIndex ?? null) != null;
+    if (replayActive !== prevReplayActiveRef.current) {
+      api?.fit();
+      prevReplayActiveRef.current = replayActive;
+    }
+    // edge-trigger price alerts on the latest close (live only)
+    if (!replayActive) {
+      const newPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
+      api?.checkAlerts(lastPriceRef.current, newPrice);
+      lastPriceRef.current = newPrice;
+    }
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, emas, ribbon, crosses, priceScale, indicators, bollinger, indicatorSettings, symbol, compare, events, vwap, volumeProfile, dataWindow, onToggleFullscreen, onToggleDataWindow, onToggleHelp, displayStartTime]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, emas, ribbon, crosses, priceScale, indicators, bollinger, indicatorSettings, symbol, compare, events, vwap, volumeProfile, dataWindow, replayIndex, onExitReplay, onToggleFullscreen, onToggleDataWindow, onToggleHelp, displayStartTime]);
 
   return (
     <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>
