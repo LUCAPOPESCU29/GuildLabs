@@ -94,6 +94,8 @@ function genDrawId(): string {
 const FIB_RETR = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
 const FIB_EXT = [1.272, 1.618, 2.0, 2.618];
 const FIB_ALL = [...FIB_RETR, ...FIB_EXT];
+// Per-drawing colour cycle (kept constant, distinct from candle colours).
+const DRAW_COLORS = ["#6b73ff", "#e0a93b", "#5b9cf0", "#d678d6", "#3fbf7f", "#ff5d6c"];
 
 interface View {
   from: number; // left-most visible bar index (fractional, may be < 0)
@@ -469,6 +471,12 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     const c = canvasRef.current;
     if (c) c.style.cursor = tool === "cursor" ? "" : tool === "erase" ? "not-allowed" : "crosshair";
   }, [tool]);
+  // Magnet: snap placement to the nearest OHLC of the clicked bar.
+  const [magnet, setMagnet] = React.useState(false);
+  const magnetRef = React.useRef(false);
+  React.useEffect(() => {
+    magnetRef.current = magnet;
+  }, [magnet]);
 
   // Live state the imperative renderer reads/writes (never triggers re-render).
   const candlesRef = React.useRef<Candle[]>(candles);
@@ -499,6 +507,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     fit: () => void;
     reset: () => void;
     exportPng: (filename: string) => void;
+    undo: () => void;
+    redo: () => void;
+    clearDrawings: () => void;
   } | null>(null);
 
   // Expose imperative actions (PNG export) to the wrapper via ref.
@@ -725,12 +736,52 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     } catch {
       // ignore corrupt storage
     }
-    const saveDrawings = () => {
+    let lastSerialized = JSON.stringify(drawings);
+    let undoStack: string[] = [];
+    let redoStack: string[] = [];
+    const persist = (s: string) => {
       try {
-        localStorage.setItem(drawKey(), JSON.stringify(drawings));
+        localStorage.setItem(drawKey(), s);
       } catch {
         // storage disabled — non-fatal
       }
+    };
+    const saveDrawings = () => {
+      const cur = JSON.stringify(drawings);
+      if (cur !== lastSerialized) {
+        undoStack.push(lastSerialized);
+        if (undoStack.length > 50) undoStack.shift();
+        redoStack = [];
+        lastSerialized = cur;
+      }
+      persist(cur);
+    };
+    const undo = () => {
+      if (!undoStack.length) return;
+      redoStack.push(lastSerialized);
+      const prev = undoStack.pop() as string;
+      drawings = JSON.parse(prev);
+      lastSerialized = prev;
+      selectedId = null;
+      persist(prev);
+      schedule();
+    };
+    const redo = () => {
+      if (!redoStack.length) return;
+      undoStack.push(lastSerialized);
+      const next = redoStack.pop() as string;
+      drawings = JSON.parse(next);
+      lastSerialized = next;
+      selectedId = null;
+      persist(next);
+      schedule();
+    };
+    const clearAllDrawings = () => {
+      if (drawings.length === 0) return;
+      drawings = [];
+      selectedId = null;
+      saveDrawings();
+      schedule();
     };
     const priceToY = (p: number) => {
       const m = mapState;
@@ -800,6 +851,37 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           const idx = Math.max(0, Math.min(candlesRef.current.length - 1, Math.round(indexForX(x))));
           const val = vw[idx];
           if (val != null && Math.abs(y - priceToY(val)) <= tol) return d.id;
+        } else if (d.type === "vline") {
+          if (Math.abs(x - timeToXc(d.points[0].t)) <= tol) return d.id;
+        } else if (d.type === "text") {
+          if (Math.hypot(x - timeToXc(d.points[0].t), y - priceToY(d.points[0].p)) <= 14) return d.id;
+        } else if ((d.type === "ray" || d.type === "arrow") && d.points.length === 2) {
+          const x1 = timeToXc(d.points[0].t);
+          const y1 = priceToY(d.points[0].p);
+          const px2 = timeToXc(d.points[1].t);
+          const py2 = priceToY(d.points[1].p);
+          // a ray extends to the right edge along its slope; an arrow stops at p2
+          let fx = px2;
+          let fy = py2;
+          if (d.type === "ray") {
+            const dx = px2 - x1;
+            if (Math.abs(dx) > 0.001) {
+              fx = 100000;
+              fy = y1 + ((py2 - y1) / dx) * (fx - x1);
+            }
+          }
+          if (distToSeg(x, y, x1, y1, fx, fy) <= tol) return d.id;
+        } else if (d.type === "rect" && d.points.length === 2) {
+          const x1 = timeToXc(d.points[0].t);
+          const x2 = timeToXc(d.points[1].t);
+          const y1 = priceToY(d.points[0].p);
+          const y2 = priceToY(d.points[1].p);
+          const inX = x >= Math.min(x1, x2) - tol && x <= Math.max(x1, x2) + tol;
+          const inY = y >= Math.min(y1, y2) - tol && y <= Math.max(y1, y2) + tol;
+          const nearEdge =
+            (inX && (Math.abs(y - y1) <= tol || Math.abs(y - y2) <= tol)) ||
+            (inY && (Math.abs(x - x1) <= tol || Math.abs(x - x2) <= tol));
+          if (nearEdge) return d.id;
         }
       }
       return null;
@@ -844,6 +926,24 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         }
       }
       return best && bestDy < 30 ? best : raw;
+    };
+    // Magnet snap: nearest OHLC of the clicked bar.
+    const magnetSnap = (px: number, py: number): { t: number; p: number } => {
+      const cs = candlesRef.current;
+      if (cs.length === 0) return { t: xToTime(px), p: yToPrice(py) };
+      const i = Math.max(0, Math.min(cs.length - 1, Math.round(indexForX(px))));
+      const c = cs[i];
+      const target = yToPrice(py);
+      let best = c.close;
+      for (const val of [c.open, c.high, c.low, c.close]) {
+        if (Math.abs(val - target) < Math.abs(best - target)) best = val;
+      }
+      return { t: c.time, p: best };
+    };
+    // Choose a placement point: magnet → OHLC; else (for 2-pt tools) swing snap.
+    const placePoint = (px: number, py: number, swing: boolean): { t: number; p: number } => {
+      if (magnetRef.current) return magnetSnap(px, py);
+      return swing ? snapPoint(px, py) : { t: xToTime(px), p: yToPrice(py) };
     };
 
     const priceRange = () => {
@@ -1761,22 +1861,85 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         ctx.setLineDash([]);
         for (const d of drawings) {
           const sel = d.id === selectedId;
-          ctx.strokeStyle = pal.chipBg;
+          const col = d.color ?? pal.chipBg;
+          ctx.strokeStyle = col;
           ctx.lineWidth = sel ? 2.5 : 1.5;
-          if (d.type === "hline") {
+          if (d.type === "avwap") {
+            // rendered in its own pass above; only handles drawn here (below)
+          } else if (d.type === "hline") {
             const y = priceToY(d.points[0].p);
             ctx.beginPath();
             ctx.moveTo(L.left, Math.round(y) + 0.5);
             ctx.lineTo(L.right, Math.round(y) + 0.5);
             ctx.stroke();
-            ctx.fillStyle = pal.chipBg;
+            ctx.fillStyle = col;
             ctx.textAlign = "left";
             ctx.fillText(fmtPrice(d.points[0].p), L.left + 4, y - 6);
+          } else if (d.type === "vline") {
+            const x = timeToXc(d.points[0].t);
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(Math.round(x) + 0.5, L.top);
+            ctx.lineTo(Math.round(x) + 0.5, L.bottom);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          } else if (d.type === "text") {
+            const x = timeToXc(d.points[0].t);
+            const y = priceToY(d.points[0].p);
+            ctx.fillStyle = col;
+            ctx.textAlign = "left";
+            ctx.fillText(d.text ?? "", x + 4, y);
           } else if (d.type === "trend" && d.points.length === 2) {
             ctx.beginPath();
             ctx.moveTo(timeToXc(d.points[0].t), priceToY(d.points[0].p));
             ctx.lineTo(timeToXc(d.points[1].t), priceToY(d.points[1].p));
             ctx.stroke();
+          } else if ((d.type === "ray" || d.type === "arrow") && d.points.length === 2) {
+            const x1 = timeToXc(d.points[0].t);
+            const y1 = priceToY(d.points[0].p);
+            let x2 = timeToXc(d.points[1].t);
+            let y2 = priceToY(d.points[1].p);
+            if (d.type === "ray") {
+              // extend to the right edge along the line's slope
+              const dx = x2 - x1;
+              if (Math.abs(dx) > 0.001) {
+                const slope = (y2 - y1) / dx;
+                y2 = y1 + slope * (L.right - x1);
+                x2 = L.right;
+              }
+            }
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+            if (d.type === "arrow") {
+              const ang = Math.atan2(y2 - y1, x2 - x1);
+              const ah = 8;
+              ctx.beginPath();
+              ctx.moveTo(x2, y2);
+              ctx.lineTo(x2 - ah * Math.cos(ang - 0.4), y2 - ah * Math.sin(ang - 0.4));
+              ctx.moveTo(x2, y2);
+              ctx.lineTo(x2 - ah * Math.cos(ang + 0.4), y2 - ah * Math.sin(ang + 0.4));
+              ctx.stroke();
+            }
+          } else if (d.type === "rect" && d.points.length === 2) {
+            const x1 = timeToXc(d.points[0].t);
+            const x2 = timeToXc(d.points[1].t);
+            const y1 = priceToY(d.points[0].p);
+            const y2 = priceToY(d.points[1].p);
+            const rx = Math.min(x1, x2);
+            const ry = Math.min(y1, y2);
+            const rw = Math.abs(x2 - x1);
+            const rh = Math.abs(y2 - y1);
+            ctx.fillStyle = toRgba(col, 0.1);
+            ctx.fillRect(rx, ry, rw, rh);
+            ctx.strokeRect(Math.round(rx) + 0.5, Math.round(ry) + 0.5, rw, rh);
+            const hiP = Math.max(d.points[0].p, d.points[1].p);
+            const loP = Math.min(d.points[0].p, d.points[1].p);
+            const pct = loP ? ((hiP - loP) / loP) * 100 : 0;
+            ctx.fillStyle = pal.legendLabel;
+            ctx.textAlign = "left";
+            ctx.fillText(`${fmtPrice(hiP - loP)}  ${pct.toFixed(2)}%`, rx + 4, ry - 5);
           } else if (d.type === "fib" && d.points.length === 2) {
             const x1 = timeToXc(d.points[0].t);
             const x2 = timeToXc(d.points[1].t);
@@ -1789,10 +1952,10 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             // golden pocket (0.382–0.618) shaded across the forward span
             const gpA = priceToY(priceAt(0.382));
             const gpB = priceToY(priceAt(0.618));
-            ctx.fillStyle = toRgba(pal.chipBg, 0.08);
+            ctx.fillStyle = toRgba(col, 0.08);
             ctx.fillRect(xa, Math.min(gpA, gpB), L.right - xa, Math.abs(gpB - gpA));
             // anchor segment (the move itself)
-            ctx.strokeStyle = pal.chipBg;
+            ctx.strokeStyle = col;
             ctx.lineWidth = sel ? 2.5 : 1.5;
             ctx.globalAlpha = 0.5;
             ctx.beginPath();
@@ -1805,7 +1968,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
               const price = priceAt(v);
               const y = priceToY(price);
               const isExt = v > 1;
-              ctx.strokeStyle = pal.chipBg;
+              ctx.strokeStyle = col;
               ctx.lineWidth = 1;
               ctx.globalAlpha = isExt ? 0.4 : 0.7;
               ctx.beginPath();
@@ -1828,7 +1991,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           }
           // selection handles
           if (sel) {
-            ctx.fillStyle = pal.chipBg;
+            ctx.fillStyle = col;
             ctx.strokeStyle = pal.onColorText;
             ctx.lineWidth = 1;
             for (let i = 0; i < d.points.length; i++) {
@@ -2313,7 +2476,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     };
 
     // Expose the bits the data effect needs, then do the first layout.
-    apiRef.current = { schedule, fit, reset, exportPng };
+    apiRef.current = { schedule, fit, reset, exportPng, undo, redo, clearDrawings: clearAllDrawings };
     if (candlesRef.current.length > 0 && rangeRef.current === null) fit();
     applySize();
 
@@ -2372,7 +2535,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           const d: Drawing = {
             id: genDrawId(),
             type: dt,
-            points: [{ t: xToTime(px), p: yToPrice(py) }],
+            points: [placePoint(px, py, false)],
           };
           if (dt === "text") {
             const label = typeof prompt === "function" ? prompt("Note text:")?.trim() : "";
@@ -2387,8 +2550,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           schedule();
           return;
         }
-        // two-click tools: trend, fib, ray, arrow, rect — snapped to nearby pivots
-        const snapped = snapPoint(px, py);
+        // two-click tools: trend, fib, ray, arrow, rect — snapped to pivots/OHLC
+        const snapped = placePoint(px, py, true);
         if (!pending) {
           pending = { type: dt as Drawing["type"], points: [snapped] };
           pendingCursor.x = px;
@@ -2598,6 +2761,13 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       if (!hovered) return;
       const ae = document.activeElement as HTMLElement | null;
       if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return;
+      // undo / redo for drawings
+      if ((e.metaKey || e.ctrlKey) && (e.key === "z" || e.key === "Z")) {
+        if (e.shiftKey) redo();
+        else undo();
+        e.preventDefault();
+        return;
+      }
       const v = viewRef.current;
       const step = (v.to - v.from) * 0.12;
       switch (e.key) {
@@ -2673,6 +2843,20 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             saveDrawings();
             schedule();
             e.preventDefault();
+          }
+          break;
+        case "c":
+        case "C":
+          // cycle the selected drawing's colour
+          if (selectedId) {
+            const d = drawings.find((x) => x.id === selectedId);
+            if (d) {
+              const idx = d.color ? DRAW_COLORS.indexOf(d.color) : -1;
+              d.color = DRAW_COLORS[(idx + 1) % DRAW_COLORS.length];
+              saveDrawings();
+              schedule();
+              e.preventDefault();
+            }
           }
           break;
         case "Escape":
@@ -2786,8 +2970,13 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             ["cursor", "↖", "Cursor / select / pan"],
             ["hline", "─", "Horizontal line"],
             ["trend", "╱", "Trend line"],
-            ["fib", "≣", "Fibonacci retracement"],
+            ["ray", "→", "Ray (extends right)"],
+            ["arrow", "↗", "Arrow"],
+            ["rect", "▭", "Rectangle / zone"],
+            ["vline", "│", "Vertical line"],
+            ["fib", "≣", "Fibonacci"],
             ["avwap", "⩒", "Anchored VWAP"],
+            ["text", "T", "Text note"],
             ["erase", "⌫", "Erase (click a drawing)"],
           ] as const
         ).map(([key, glyph, label]) => {
@@ -2811,6 +3000,33 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             </button>
           );
         })}
+        {/* divider */}
+        <span className="mx-0.5 h-4 w-px" style={{ background: "var(--card-border)" }} />
+        {(
+          [
+            ["magnet", "🧲", "Magnet: snap to OHLC", magnet, () => setMagnet((m) => !m)],
+            ["undo", "↶", "Undo (⌘Z)", false, () => apiRef.current?.undo()],
+            ["redo", "↷", "Redo (⇧⌘Z)", false, () => apiRef.current?.redo()],
+            ["clear", "🗑", "Clear all drawings", false, () => apiRef.current?.clearDrawings()],
+          ] as const
+        ).map(([key, glyph, label, active, onClick]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={onClick}
+            title={label}
+            aria-label={label}
+            aria-pressed={active}
+            className="flex h-6 w-6 items-center justify-center rounded-full font-mono text-xs transition-colors"
+            style={
+              active
+                ? { background: "var(--success)", color: "#000" }
+                : { color: "var(--muted-foreground)" }
+            }
+          >
+            {glyph}
+          </button>
+        ))}
       </div>
       <button
         type="button"
