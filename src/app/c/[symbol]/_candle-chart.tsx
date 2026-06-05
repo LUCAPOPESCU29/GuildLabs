@@ -107,6 +107,7 @@ export type DrawTool =
   | "long"
   | "short"
   | "channel"
+  | "alert"
   | "erase";
 interface Drawing {
   id: string;
@@ -122,7 +123,8 @@ interface Drawing {
     | "text"
     | "long"
     | "short"
-    | "channel";
+    | "channel"
+    | "alert";
   // hline/vline/avwap/text: 1 pt; trend/fib/ray/arrow/rect: 2; long/short: 3
   // (entry,stop,target); channel: 3 (base a, base b, offset)
   points: Array<{ t: number; p: number }>;
@@ -550,6 +552,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const volProfileRef = React.useRef(volumeProfile);
   const onFsRef = React.useRef(onToggleFullscreen);
   const displayStartRef = React.useRef<number | undefined>(displayStartTime);
+  const lastPriceRef = React.useRef<number | null>(null);
 
   // Bridge to the mount-effect closures so the data effect can drive a repaint.
   const apiRef = React.useRef<{
@@ -560,6 +563,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     undo: () => void;
     redo: () => void;
     clearDrawings: () => void;
+    checkAlerts: (prev: number | null, next: number | null) => void;
   } | null>(null);
 
   // Expose imperative actions (PNG export) to the wrapper via ref.
@@ -833,6 +837,35 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       saveDrawings();
       schedule();
     };
+
+    // ── price alerts (alert-type drawings): browser notify on crossing ──
+    const alertSide = new Map<string, number>(); // id → sign(price - level)
+    const alertFlash = new Map<string, number>(); // id → flash-until ts
+    const checkAlerts = (prev: number | null, next: number | null) => {
+      if (prev == null || next == null) return;
+      let fired = false;
+      for (const d of drawings) {
+        if (d.type !== "alert") continue;
+        const level = d.points[0].p;
+        const side = next >= level ? 1 : -1;
+        const prevSide = alertSide.has(d.id) ? (alertSide.get(d.id) as number) : prev >= level ? 1 : -1;
+        if (alertSide.has(d.id) && side !== prevSide) {
+          alertFlash.set(d.id, performance.now() + 2500);
+          fired = true;
+          try {
+            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+              new Notification(`${symbolRef.current ?? "Alert"} crossed ${fmtPrice(level)}`, {
+                body: `Price ${side > 0 ? "rose above" : "fell below"} ${fmtPrice(level)} (now ${fmtPrice(next)})`,
+              });
+            }
+          } catch {
+            // notifications unavailable — the on-chart flash still fires
+          }
+        }
+        alertSide.set(d.id, side);
+      }
+      if (fired) schedule();
+    };
     const priceToY = (p: number) => {
       const m = mapState;
       return m.useLog && p > 0
@@ -882,7 +915,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       const tol = 6;
       for (let k = drawings.length - 1; k >= 0; k--) {
         const d = drawings[k];
-        if (d.type === "hline") {
+        if (d.type === "hline" || d.type === "alert") {
           if (Math.abs(y - priceToY(d.points[0].p)) <= tol) return d.id;
         } else if (d.type === "trend" && d.points.length === 2) {
           const x1 = timeToXc(d.points[0].t);
@@ -954,7 +987,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     };
     // screen position of a drawing's editable handle #i
     const handlePos = (d: Drawing, i: number): { x: number; y: number } => {
-      if (d.type === "hline") return { x: layout().right - 8, y: priceToY(d.points[0].p) };
+      if (d.type === "hline" || d.type === "alert") return { x: layout().right - 8, y: priceToY(d.points[0].p) };
       return { x: timeToXc(d.points[i].t), y: priceToY(d.points[i].p) };
     };
     // which handle of a drawing is under (x,y), or null
@@ -1933,6 +1966,23 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           ctx.lineWidth = sel ? 2.5 : 1.5;
           if (d.type === "avwap") {
             // rendered in its own pass above; only handles drawn here (below)
+          } else if (d.type === "alert") {
+            const y = priceToY(d.points[0].p);
+            const flashing = (alertFlash.get(d.id) ?? 0) > performance.now();
+            const ac = d.color ?? pal.ma[0];
+            ctx.strokeStyle = ac;
+            ctx.lineWidth = flashing ? 2.5 : 1;
+            ctx.globalAlpha = flashing ? 0.9 : 0.7;
+            ctx.setLineDash([2, 3]);
+            ctx.beginPath();
+            ctx.moveTo(L.left, Math.round(y) + 0.5);
+            ctx.lineTo(L.right, Math.round(y) + 0.5);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = ac;
+            ctx.textAlign = "left";
+            ctx.fillText(`🔔 ${fmtPrice(d.points[0].p)}`, L.left + 4, y - 6);
           } else if (d.type === "hline") {
             const y = priceToY(d.points[0].p);
             ctx.beginPath();
@@ -2620,7 +2670,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     };
 
     // Expose the bits the data effect needs, then do the first layout.
-    apiRef.current = { schedule, fit, reset, exportPng, undo, redo, clearDrawings: clearAllDrawings };
+    apiRef.current = { schedule, fit, reset, exportPng, undo, redo, clearDrawings: clearAllDrawings, checkAlerts };
     if (candlesRef.current.length > 0 && rangeRef.current === null) fit();
     applySize();
 
@@ -2670,6 +2720,21 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           if (hit) {
             drawings = drawings.filter((d) => d.id !== hit);
             saveDrawings();
+          }
+          schedule();
+          return;
+        }
+        // price alert: 1 click at the price level; ask for notification permission
+        if (dt === "alert") {
+          const pt = placePoint(px, py, false);
+          drawings.push({ id: genDrawId(), type: "alert", points: [{ t: pt.t, p: pt.p }] });
+          saveDrawings();
+          try {
+            if (typeof Notification !== "undefined" && Notification.permission === "default") {
+              Notification.requestPermission();
+            }
+          } catch {
+            // ignore — flash still works
           }
           schedule();
           return;
@@ -3120,6 +3185,10 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       }
     }
     prevLenRef.current = candles.length;
+    // edge-trigger price alerts on the latest close
+    const newPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
+    api?.checkAlerts(lastPriceRef.current, newPrice);
+    lastPriceRef.current = newPrice;
     api?.schedule();
   }, [candles, interval, currency, range, chartType, showVolume, mas, emas, ribbon, crosses, priceScale, indicators, bollinger, indicatorSettings, symbol, compare, events, vwap, volumeProfile, onToggleFullscreen, displayStartTime]);
 
@@ -3148,6 +3217,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             ["channel", "▱", "Parallel channel"],
             ["long", "L↑", "Long position (risk/reward)"],
             ["short", "S↓", "Short position (risk/reward)"],
+            ["alert", "🔔", "Price alert (browser notify while tab open)"],
             ["avwap", "⩒", "Anchored VWAP"],
             ["text", "T", "Text note"],
             ["erase", "⌫", "Erase (click a drawing)"],
