@@ -15,20 +15,37 @@ import {
   Camera,
   Maximize2,
   Minimize2,
+  Settings2,
 } from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
 import CandleChart, {
   MA_COLORS,
+  DEFAULT_INDICATOR_SETTINGS,
   type ChartType,
   type PriceScale,
   type Indicator,
+  type IndicatorSettings,
   type CandleChartHandle,
 } from "./_candle-chart";
 
 // Moving averages the page offers as toggleable overlays.
 const MA_OPTIONS = [20, 50] as const;
 const EMA_OPTIONS = [9, 21, 50, 200] as const;
+
+// Editable indicator parameters shown in the settings popover.
+const SETTING_FIELDS: ReadonlyArray<{ key: keyof IndicatorSettings; label: string }> = [
+  { key: "rsi", label: "RSI" },
+  { key: "macdFast", label: "MACD fast" },
+  { key: "macdSlow", label: "MACD slow" },
+  { key: "macdSignal", label: "MACD signal" },
+  { key: "bbPeriod", label: "BB period" },
+  { key: "bbMult", label: "BB σ" },
+  { key: "stochK", label: "Stoch %K" },
+  { key: "stochD", label: "Stoch %D" },
+  { key: "atr", label: "ATR" },
+  { key: "volMa", label: "Vol MA" },
+];
 
 // Price-axis scale options shown in the segmented control.
 const SCALE_OPTIONS: ReadonlyArray<{ key: PriceScale; label: string }> = [
@@ -116,6 +133,23 @@ interface ChartPrefs {
   ema: number[];
   rib: boolean;
   cr: boolean;
+  cfg: IndicatorSettings;
+}
+
+// Validate a partial settings object, keeping only sane positive numbers.
+function sanitizeSettings(v: unknown): IndicatorSettings | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const raw = v as Record<string, unknown>;
+  const out: IndicatorSettings = { ...DEFAULT_INDICATOR_SETTINGS };
+  let touched = false;
+  for (const k of Object.keys(DEFAULT_INDICATOR_SETTINGS) as (keyof IndicatorSettings)[]) {
+    const n = Number(raw[k]);
+    if (Number.isFinite(n) && n > 0 && n <= 400) {
+      out[k] = n;
+      touched = true;
+    }
+  }
+  return touched ? out : undefined;
 }
 
 const isChartType = (v: unknown): v is ChartType =>
@@ -132,19 +166,18 @@ function sanitizeIndicators(v: unknown): Indicator[] | undefined {
   if (!Array.isArray(v)) return undefined;
   return [...new Set(v.filter(isIndicator))].slice(0, MAX_PANES);
 }
-const sanitizeMas = (arr: unknown): number[] | undefined => {
+// Allow the preset pills plus any custom positive-integer period (added via the
+// settings popover); de-duped, capped, sorted.
+const sanitizePeriods = (arr: unknown): number[] | undefined => {
   if (!Array.isArray(arr)) return undefined;
-  const allowed = MA_OPTIONS as readonly number[];
-  const out = [...new Set(arr.map(Number).filter((n) => allowed.includes(n)))].sort(
-    (a, b) => a - b
-  );
-  return out;
+  return [
+    ...new Set(arr.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 400)),
+  ]
+    .sort((a, b) => a - b)
+    .slice(0, 8);
 };
-const sanitizeEmas = (arr: unknown): number[] | undefined => {
-  if (!Array.isArray(arr)) return undefined;
-  const allowed = EMA_OPTIONS as readonly number[];
-  return [...new Set(arr.map(Number).filter((n) => allowed.includes(n)))].sort((a, b) => a - b);
-};
+const sanitizeMas = sanitizePeriods;
+const sanitizeEmas = sanitizePeriods;
 
 // localStorage prefs (validated). Empty when unavailable/corrupt.
 function readStoredPrefs(): Partial<ChartPrefs> {
@@ -166,6 +199,8 @@ function readStoredPrefs(): Partial<ChartPrefs> {
     if (ema) out.ema = ema;
     if (typeof p.rib === "boolean") out.rib = p.rib;
     if (typeof p.cr === "boolean") out.cr = p.cr;
+    const cfg = sanitizeSettings(p.cfg);
+    if (cfg) out.cfg = cfg;
     const ma = sanitizeMas(p.ma);
     if (ma) out.ma = ma;
     return out;
@@ -205,6 +240,15 @@ function readUrlPrefs(): Partial<ChartPrefs> {
   if (rib === "0" || rib === "1") out.rib = rib === "1";
   const cr = q.get("cr");
   if (cr === "0" || cr === "1") out.cr = cr === "1";
+  const cfgRaw = q.get("cfg");
+  if (cfgRaw) {
+    try {
+      const cfg = sanitizeSettings(JSON.parse(decodeURIComponent(cfgRaw)));
+      if (cfg) out.cfg = cfg;
+    } catch {
+      // ignore bad cfg param
+    }
+  }
   const ma = q.get("ma");
   if (ma != null) {
     const parsed = sanitizeMas(ma.split(",").map((s) => Number(s.trim())));
@@ -411,6 +455,10 @@ export default function LiveChart({
   const [emas, setEmas] = React.useState<number[]>([]);
   const [ribbon, setRibbon] = React.useState(false);
   const [crosses, setCrosses] = React.useState(false);
+  const [settings, setSettings] = React.useState<IndicatorSettings>(DEFAULT_INDICATOR_SETTINGS);
+  const [showSettings, setShowSettings] = React.useState(false);
+  const [maInput, setMaInput] = React.useState("");
+  const [emaInput, setEmaInput] = React.useState("");
   const [searchValue, setSearchValue] = React.useState("");
   const [compareSymbol, setCompareSymbol] = React.useState<string | null>(null);
   const [compareData, setCompareData] = React.useState<{ symbol: string; candles: Candle[] } | null>(null);
@@ -579,6 +627,7 @@ export default function LiveChart({
     if (p.ema != null) setEmas(p.ema);
     if (p.rib != null) setRibbon(p.rib);
     if (p.cr != null) setCrosses(p.cr);
+    if (p.cfg != null) setSettings(p.cfg);
     // compare ticker rides the URL only (not localStorage)
     const cmp = new URLSearchParams(window.location.search).get("cmp");
     if (cmp) setCompareSymbol(cmp.toUpperCase());
@@ -601,12 +650,13 @@ export default function LiveChart({
         ema: emas,
         rib: ribbon,
         cr: crosses,
+        cfg: settings,
       };
       window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     } catch {
       // storage full / disabled — non-fatal
     }
-  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses]);
+  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, settings]);
 
   // Build a shareable deep link encoding the current view, copy to clipboard.
   const onShare = React.useCallback(() => {
@@ -624,6 +674,9 @@ export default function LiveChart({
     if (emas.length) params.set("ema", emas.join(","));
     if (ribbon) params.set("rib", "1");
     if (crosses) params.set("cr", "1");
+    if (JSON.stringify(settings) !== JSON.stringify(DEFAULT_INDICATOR_SETTINGS)) {
+      params.set("cfg", encodeURIComponent(JSON.stringify(settings)));
+    }
     if (compareSymbol) params.set("cmp", compareSymbol);
     const url = `${window.location.origin}/c/${encodeURIComponent(symbol)}?${params}`;
     const done = () => {
@@ -632,7 +685,7 @@ export default function LiveChart({
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     };
     navigator.clipboard?.writeText(url).then(done).catch(done);
-  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, compareSymbol, symbol]);
+  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, settings, compareSymbol, symbol]);
 
   // ── Price flash on tick ────────────────────────────────────────────────────
   // The CandleChart owns all rendering; here we only watch the price for the
@@ -1013,6 +1066,102 @@ export default function LiveChart({
                 </button>
               ))}
 
+              {/* Indicator settings popover */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowSettings((s) => !s)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                  style={
+                    showSettings
+                      ? { background: UP, color: "#000", borderColor: "transparent" }
+                      : { background: "var(--card)", color: "var(--muted-foreground)" }
+                  }
+                  aria-pressed={showSettings}
+                  title="Indicator settings"
+                >
+                  <Settings2 className="size-3.5" />
+                </button>
+                {showSettings && (
+                  <div
+                    className="absolute left-0 top-full z-30 mt-2 w-64 rounded-2xl border border-card-border p-3 shadow-xl"
+                    style={{ background: "var(--card)" }}
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Indicator settings
+                      </span>
+                      <button
+                        onClick={() => setSettings(DEFAULT_INDICATOR_SETTINGS)}
+                        className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                        title="Reset to defaults"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {SETTING_FIELDS.map((f) => (
+                        <label key={f.key} className="flex items-center justify-between gap-1.5">
+                          <span className="font-mono text-[10px] text-muted-foreground">{f.label}</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={400}
+                            step={f.key === "bbMult" ? 0.5 : 1}
+                            value={settings[f.key]}
+                            onChange={(e) => {
+                              const n = Number(e.target.value);
+                              if (Number.isFinite(n) && n > 0 && n <= 400) {
+                                setSettings((s) => ({ ...s, [f.key]: n }));
+                              }
+                            }}
+                            className="w-14 rounded border border-card-border bg-background px-1.5 py-0.5 text-right font-mono text-xs text-foreground focus:outline-none"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mt-3 space-y-1.5 border-t border-card-border pt-2">
+                      {([
+                        ["MA", maInput, setMaInput, mas, toggleMa] as const,
+                        ["EMA", emaInput, setEmaInput, emas, toggleEma] as const,
+                      ]).map(([label, val, setVal, active, toggle]) => (
+                        <div key={label} className="flex items-center gap-1.5">
+                          <span className="w-8 font-mono text-[10px] text-muted-foreground">{label}</span>
+                          <div className="flex flex-1 flex-wrap gap-1">
+                            {active.map((p) => (
+                              <button
+                                key={p}
+                                onClick={() => toggle(p)}
+                                className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold"
+                                style={{ background: UP, color: "#000" }}
+                                title="Remove"
+                              >
+                                {p}✕
+                              </button>
+                            ))}
+                          </div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={400}
+                            value={val}
+                            onChange={(e) => setVal(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                const n = Number(val);
+                                if (Number.isInteger(n) && n >= 1 && n <= 400 && !active.includes(n)) toggle(n);
+                                setVal("");
+                              }
+                            }}
+                            placeholder="add"
+                            className="w-12 rounded border border-card-border bg-background px-1.5 py-0.5 text-right font-mono text-[10px] text-foreground placeholder:normal-case focus:outline-none"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Share current view */}
               <button
                 onClick={onShare}
@@ -1136,6 +1285,7 @@ export default function LiveChart({
                   priceScale={priceScale}
                   indicators={indicators}
                   bollinger={bollinger}
+                  indicatorSettings={settings}
                   symbol={(data.symbol ?? symbol).toUpperCase()}
                   compare={compareData}
                   events={data.events}

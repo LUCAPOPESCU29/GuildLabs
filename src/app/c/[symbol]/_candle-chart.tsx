@@ -57,6 +57,32 @@ export type PriceScale = "linear" | "log" | "percent";
 // ATR(14), OBV.
 export type Indicator = "rsi" | "macd" | "stoch" | "atr" | "obv";
 
+// User-tunable periods/params for the indicators (defaults match the classics).
+export interface IndicatorSettings {
+  rsi: number;
+  macdFast: number;
+  macdSlow: number;
+  macdSignal: number;
+  bbPeriod: number;
+  bbMult: number;
+  stochK: number;
+  stochD: number;
+  atr: number;
+  volMa: number;
+}
+export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
+  rsi: 14,
+  macdFast: 12,
+  macdSlow: 26,
+  macdSignal: 9,
+  bbPeriod: 20,
+  bbMult: 2,
+  stochK: 14,
+  stochD: 3,
+  atr: 14,
+  volMa: 20,
+};
+
 export interface Candle {
   time: number; // unix seconds
   open: number;
@@ -117,6 +143,7 @@ interface CandleChartProps {
   priceScale?: PriceScale;
   indicators?: Indicator[]; // stacked oscillator sub-panels below the chart
   bollinger?: boolean; // Bollinger Bands (20, 2σ) overlay on the price series
+  indicatorSettings?: Partial<IndicatorSettings>; // tunable periods/params
   symbol?: string; // primary ticker (for drawings key + compare legend)
   compare?: { symbol: string; candles: Candle[] } | null; // overlay (normalized %)
   events?: Array<{ time: number; type: "div" | "split"; text: string }>; // div/split pins
@@ -449,6 +476,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     priceScale = "linear",
     indicators = [],
     bollinger = false,
+    indicatorSettings,
     symbol,
     compare,
     events,
@@ -493,6 +521,10 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const priceScaleRef = React.useRef<PriceScale>(priceScale);
   const indicatorsRef = React.useRef<Indicator[]>(indicators);
   const bollingerRef = React.useRef<boolean>(bollinger);
+  const settingsRef = React.useRef<IndicatorSettings>({
+    ...DEFAULT_INDICATOR_SETTINGS,
+    ...indicatorSettings,
+  });
   const symbolRef = React.useRef<string | undefined>(symbol);
   const compareRef = React.useRef<{ symbol: string; candles: Candle[] } | null | undefined>(compare);
   const eventsRef = React.useRef(events);
@@ -996,6 +1028,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       ctx.font = FONT;
       ctx.textBaseline = "middle";
 
+      const s = settingsRef.current; // tunable indicator periods/params
       // hex (#rrggbb, as resolvePalette emits) → rgba() for translucent fills.
       const toRgba = (hexColor: string, a: number) => {
         const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hexColor);
@@ -1124,7 +1157,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         }
         if (volMax > 0) {
           const vbW = Math.max(1, bw * 0.7);
-          const volMa = computeVolMA(cs, 20);
+          const volMa = computeVolMA(cs, s.volMa);
           ctx.save();
           ctx.beginPath();
           ctx.rect(L.left, L.volTop, L.plotW, L.volH);
@@ -1281,7 +1314,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           legend(pane, `${label}${lv != null ? `  ${lv.toFixed(1)}` : ""}`);
         };
         const drawMACD = (pane: Pane) => {
-          const { macd, signal, hist } = computeMACD(cs);
+          const { macd, signal, hist } = computeMACD(cs, s.macdFast, s.macdSlow, s.macdSignal);
           const { mn, mx } = visExtent([macd, signal, hist]);
           const mag = Math.max(Math.abs(mn), Math.abs(mx)) || 1;
           const span2 = 2 * mag;
@@ -1309,7 +1342,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           strokeSeries(macd, pal.ma[1], yFor);
           strokeSeries(signal, pal.ma[0], yFor);
           ctx.restore();
-          legend(pane, "MACD 12 26 9");
+          legend(pane, `MACD ${s.macdFast} ${s.macdSlow} ${s.macdSignal}`);
         };
         const drawSingle = (
           pane: Pane,
@@ -1341,12 +1374,12 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           if (!pane) continue;
           const kind = inds[pi];
           if (kind === "rsi") {
-            const rsi = computeRSI(cs, 14);
-            drawBanded(pane, [{ arr: rsi, color: pal.chipBg }], 70, 30, "RSI 14", rsi);
+            const rsi = computeRSI(cs, s.rsi);
+            drawBanded(pane, [{ arr: rsi, color: pal.chipBg }], 70, 30, `RSI ${s.rsi}`, rsi);
           } else if (kind === "macd") {
             drawMACD(pane);
           } else if (kind === "stoch") {
-            const { k, d } = computeStochastic(cs, 14, 3);
+            const { k, d } = computeStochastic(cs, s.stochK, s.stochD);
             drawBanded(
               pane,
               [
@@ -1355,11 +1388,11 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
               ],
               80,
               20,
-              "STOCH 14 3",
+              `STOCH ${s.stochK} ${s.stochD}`,
               k
             );
           } else if (kind === "atr") {
-            drawSingle(pane, computeATR(cs, 14), pal.ma[2] ?? pal.chipBg, "ATR 14", (n) => fmtPrice(n));
+            drawSingle(pane, computeATR(cs, s.atr), pal.ma[2] ?? pal.chipBg, `ATR ${s.atr}`, (n) => fmtPrice(n));
           } else if (kind === "obv") {
             drawSingle(pane, computeOBV(cs), pal.ma[1], "OBV", (n) => fmtVol(n));
           }
@@ -1565,7 +1598,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
 
       // ── Bollinger Bands (20, 2σ) — inside the same price clip ──
       if (bollingerRef.current) {
-        const bb = computeBollinger(cs, 20, 2);
+        const bb = computeBollinger(cs, s.bbPeriod, s.bbMult);
         const col = pal.ma[2] ?? pal.chipBg; // distinct from MA20/MA50 colours
         // translucent fill between the upper and lower band
         ctx.save();
@@ -2173,7 +2206,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           }
         }
         if (bollingerRef.current) {
-          const bb2 = computeBollinger(cs, 20, 2);
+          const bb2 = computeBollinger(cs, s.bbPeriod, s.bbMult);
           const li = cs.length - 1;
           const u = bb2.upper[li];
           const l = bb2.lower[li];
@@ -2185,7 +2218,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             extra = `  %B ${pctB.toFixed(0)}  BW ${bw.toFixed(1)}`;
           }
           ctx.fillStyle = pal.ma[2] ?? pal.chipBg;
-          const label = `BB 20 2${extra}`;
+          const label = `BB ${s.bbPeriod} ${s.bbMult}${extra}`;
           ctx.fillText(label, mlx, mly);
           mlx += ctx.measureText(label).width + 12;
         }
@@ -2916,6 +2949,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     priceScaleRef.current = priceScale;
     indicatorsRef.current = indicators;
     bollingerRef.current = bollinger;
+    settingsRef.current = { ...DEFAULT_INDICATOR_SETTINGS, ...indicatorSettings };
     symbolRef.current = symbol;
     compareRef.current = compare;
     eventsRef.current = events;
@@ -2951,7 +2985,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     }
     prevLenRef.current = candles.length;
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, emas, ribbon, crosses, priceScale, indicators, bollinger, symbol, compare, events, vwap, volumeProfile, onToggleFullscreen, displayStartTime]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, emas, ribbon, crosses, priceScale, indicators, bollinger, indicatorSettings, symbol, compare, events, vwap, volumeProfile, onToggleFullscreen, displayStartTime]);
 
   return (
     <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>
