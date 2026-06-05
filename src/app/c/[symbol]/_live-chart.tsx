@@ -13,10 +13,29 @@ import {
 } from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
-import CandleChart, { MA_COLORS, type ChartType } from "./_candle-chart";
+import CandleChart, {
+  MA_COLORS,
+  type ChartType,
+  type PriceScale,
+  type Indicator,
+} from "./_candle-chart";
 
 // Moving averages the page offers as toggleable overlays.
 const MA_OPTIONS = [20, 50] as const;
+
+// Price-axis scale options shown in the segmented control.
+const SCALE_OPTIONS: ReadonlyArray<{ key: PriceScale; label: string }> = [
+  { key: "linear", label: "Lin" },
+  { key: "log", label: "Log" },
+  { key: "percent", label: "%" },
+];
+
+// Oscillator sub-panel options.
+const INDICATOR_OPTIONS: ReadonlyArray<{ key: Indicator; label: string }> = [
+  { key: "none", label: "None" },
+  { key: "rsi", label: "RSI" },
+  { key: "macd", label: "MACD" },
+];
 
 // Purple + green chart theme, drawn from the FORGE design tokens so the page
 // shares the site's palette and tracks light/dark automatically: green
@@ -214,6 +233,8 @@ export default function LiveChart({
   const [chartType, setChartType] = React.useState<ChartType>("candles");
   const [showVolume, setShowVolume] = React.useState(true);
   const [mas, setMas] = React.useState<number[]>([]); // active SMA periods, ascending
+  const [priceScale, setPriceScale] = React.useState<PriceScale>("linear");
+  const [indicator, setIndicator] = React.useState<Indicator>("none");
   const [searchValue, setSearchValue] = React.useState("");
 
   const prevPriceRef = React.useRef<number | null>(null);
@@ -510,6 +531,51 @@ export default function LiveChart({
                   </button>
                 );
               })}
+
+              {/* Price scale: linear / log / % */}
+              <div className="inline-flex rounded-full border border-card-border bg-card p-1">
+                {SCALE_OPTIONS.map((s) => {
+                  const active = priceScale === s.key;
+                  return (
+                    <button
+                      key={s.key}
+                      onClick={() => setPriceScale(s.key)}
+                      className="rounded-full px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                      style={
+                        active
+                          ? { background: UP, color: "#000" }
+                          : { color: "var(--muted-foreground)" }
+                      }
+                      aria-pressed={active}
+                      title={`${s.label} price scale`}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Oscillator panel: none / RSI / MACD */}
+              <div className="inline-flex rounded-full border border-card-border bg-card p-1">
+                {INDICATOR_OPTIONS.map((o) => {
+                  const active = indicator === o.key;
+                  return (
+                    <button
+                      key={o.key}
+                      onClick={() => setIndicator(o.key)}
+                      className="rounded-full px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                      style={
+                        active
+                          ? { background: UP, color: "#000" }
+                          : { color: "var(--muted-foreground)" }
+                      }
+                      aria-pressed={active}
+                    >
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Ticker search */}
@@ -547,6 +613,8 @@ export default function LiveChart({
                   chartType={chartType}
                   showVolume={showVolume}
                   mas={mas}
+                  priceScale={priceScale}
+                  indicator={indicator}
                   className="absolute inset-0"
                 />
               )}

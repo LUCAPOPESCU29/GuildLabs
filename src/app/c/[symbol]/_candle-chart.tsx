@@ -45,6 +45,17 @@ const PAD = 10;
 
 export type ChartType = "candles" | "area";
 
+// Price-axis mapping. "linear" is plain price; "log" spaces bars by log10(price)
+// so equal % moves take equal vertical space (good for long ranges / volatile
+// crypto); "percent" keeps linear positioning but relabels the axis as % change
+// from the left-most visible bar (percent is a linear function of price, so the
+// plotted shape is identical to linear — only the labels differ).
+export type PriceScale = "linear" | "log" | "percent";
+
+// Optional oscillator drawn in a sub-panel below the chart. "rsi" = Relative
+// Strength Index (14); "macd" = Moving Average Convergence Divergence (12/26/9).
+export type Indicator = "none" | "rsi" | "macd";
+
 export interface Candle {
   time: number; // unix seconds
   open: number;
@@ -68,6 +79,8 @@ interface CandleChartProps {
   chartType?: ChartType;
   showVolume?: boolean;
   mas?: number[]; // SMA periods to overlay, e.g. [20, 50]; empty = none
+  priceScale?: PriceScale;
+  indicator?: Indicator; // oscillator sub-panel below the chart
 }
 
 // ── Number / time formatting ─────────────────────────────────────────────────
@@ -127,6 +140,83 @@ function computeSMA(cs: Candle[], period: number): Array<number | null> {
   return out;
 }
 
+// Wilder's RSI over close prices. Returns same-length array; nulls until the
+// first value is computable (index `period`).
+function computeRSI(cs: Candle[], period = 14): Array<number | null> {
+  const out: Array<number | null> = new Array(cs.length).fill(null);
+  if (cs.length <= period) return out;
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i <= period; i++) {
+    const ch = cs[i].close - cs[i - 1].close;
+    if (ch >= 0) gain += ch;
+    else loss -= ch;
+  }
+  let avgGain = gain / period;
+  let avgLoss = loss / period;
+  out[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  for (let i = period + 1; i < cs.length; i++) {
+    const ch = cs[i].close - cs[i - 1].close;
+    const g = ch > 0 ? ch : 0;
+    const l = ch < 0 ? -ch : 0;
+    avgGain = (avgGain * (period - 1) + g) / period;
+    avgLoss = (avgLoss * (period - 1) + l) / period;
+    out[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  return out;
+}
+
+// Exponential moving average over a plain number series, seeded with the SMA of
+// the first `period` values. Same-length output; nulls before `period - 1`.
+function computeEMA(values: number[], period: number): Array<number | null> {
+  const out: Array<number | null> = new Array(values.length).fill(null);
+  if (values.length < period || period <= 0) return out;
+  const k = 2 / (period + 1);
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += values[i];
+  let ema = sum / period;
+  out[period - 1] = ema;
+  for (let i = period; i < values.length; i++) {
+    ema = values[i] * k + ema * (1 - k);
+    out[i] = ema;
+  }
+  return out;
+}
+
+// MACD(fast, slow, signal): line = EMAfast - EMAslow, signal = EMA of the line,
+// histogram = line - signal. All three are same-length, null-padded arrays.
+function computeMACD(
+  cs: Candle[],
+  fast = 12,
+  slow = 26,
+  signalPeriod = 9
+): { macd: Array<number | null>; signal: Array<number | null>; hist: Array<number | null> } {
+  const closes = cs.map((c) => c.close);
+  const emaFast = computeEMA(closes, fast);
+  const emaSlow = computeEMA(closes, slow);
+  const macd: Array<number | null> = closes.map((_, i) =>
+    emaFast[i] != null && emaSlow[i] != null ? (emaFast[i] as number) - (emaSlow[i] as number) : null
+  );
+  // EMA the macd line, but only over its non-null span (then scatter back).
+  const compact: number[] = [];
+  const idxMap: number[] = [];
+  for (let i = 0; i < macd.length; i++) {
+    if (macd[i] != null) {
+      compact.push(macd[i] as number);
+      idxMap.push(i);
+    }
+  }
+  const sigCompact = computeEMA(compact, signalPeriod);
+  const signal: Array<number | null> = new Array(cs.length).fill(null);
+  for (let j = 0; j < sigCompact.length; j++) {
+    if (sigCompact[j] != null) signal[idxMap[j]] = sigCompact[j];
+  }
+  const hist: Array<number | null> = macd.map((m, i) =>
+    m != null && signal[i] != null ? m - (signal[i] as number) : null
+  );
+  return { macd, signal, hist };
+}
+
 // Compact volume formatting: 12.3M, 4.5K, etc.
 function fmtVol(n: number): string {
   const abs = Math.abs(n);
@@ -164,6 +254,8 @@ export default function CandleChart({
   chartType = "candles",
   showVolume = true,
   mas = [],
+  priceScale = "linear",
+  indicator = "none",
 }: CandleChartProps) {
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -177,6 +269,8 @@ export default function CandleChart({
   const chartTypeRef = React.useRef<ChartType>(chartType);
   const showVolumeRef = React.useRef(showVolume);
   const masRef = React.useRef<number[]>(mas);
+  const priceScaleRef = React.useRef<PriceScale>(priceScale);
+  const indicatorRef = React.useRef<Indicator>(indicator);
 
   // Bridge to the mount-effect closures so the data effect can drive a repaint.
   const apiRef = React.useRef<{
@@ -248,12 +342,19 @@ export default function CandleChart({
       const top = PAD;
       const bottom = size.h - TIME_H;
       const innerH = bottom - top;
-      // When volume is on, reserve a band at the bottom of the plot for it and a
-      // small gap so the bars don't crowd the price area.
+      const gap = 8;
+      // Stack from the bottom up: indicator panel (if any), then volume, then the
+      // price area takes whatever's left. Each band only claims space + a gap
+      // when it's enabled, so price uses the full height when both are off.
+      const indH = indicatorRef.current !== "none" ? Math.max(40, Math.round(innerH * 0.18)) : 0;
       const volH = showVolumeRef.current ? Math.max(28, Math.round(innerH * 0.16)) : 0;
-      const gap = volH > 0 ? 8 : 0;
+
+      const indBottom = bottom;
+      const indTop = bottom - indH;
+      const volBottom = indH > 0 ? indTop - gap : bottom;
+      const volTop = volBottom - volH;
       const priceTop = top;
-      const priceBottom = bottom - volH - gap;
+      const priceBottom = volH > 0 ? volTop - gap : indH > 0 ? indTop - gap : bottom;
       return {
         w: size.w,
         h: size.h,
@@ -266,9 +367,12 @@ export default function CandleChart({
         priceTop,
         priceBottom,
         pricePlotH: priceBottom - priceTop,
-        volTop: priceBottom + gap,
-        volBottom: bottom,
+        volTop,
+        volBottom,
         volH,
+        indTop,
+        indBottom,
+        indH,
       };
     };
 
@@ -328,8 +432,31 @@ export default function CandleChart({
 
       const { lo, hi } = priceRange();
       const span = hi - lo || 1;
-      const yForPrice = (p: number) => L.priceTop + ((hi - p) / span) * L.pricePlotH;
-      const priceForY = (y: number) => hi - ((y - L.priceTop) / L.pricePlotH) * span;
+      // Log positioning needs strictly-positive bounds; fall back to linear if a
+      // series dips to/below zero (shouldn't happen for prices, but stay safe).
+      const scale = priceScaleRef.current;
+      const useLog = scale === "log" && lo > 0 && hi > 0;
+      const logLo = useLog ? Math.log10(lo) : 0;
+      const logHi = useLog ? Math.log10(hi) : 0;
+      const logSpan = logHi - logLo || 1;
+      const yForPrice = (p: number) =>
+        useLog && p > 0
+          ? L.priceTop + ((logHi - Math.log10(p)) / logSpan) * L.pricePlotH
+          : L.priceTop + ((hi - p) / span) * L.pricePlotH;
+      const priceForY = (y: number) =>
+        useLog
+          ? Math.pow(10, logHi - ((y - L.priceTop) / L.pricePlotH) * logSpan)
+          : hi - ((y - L.priceTop) / L.pricePlotH) * span;
+
+      // Percent mode relabels the price axis as % change from the left-most
+      // visible bar's close; everything else (positioning) is unchanged.
+      const vNow = viewRef.current;
+      const baseIdx = Math.max(0, Math.min(cs.length - 1, Math.floor(vNow.from < 0 ? 0 : vNow.from)));
+      const pctBase = cs.length > 0 ? cs[baseIdx].close : 0;
+      const fmtAxis = (p: number) =>
+        scale === "percent" && pctBase
+          ? `${(p / pctBase - 1) * 100 >= 0 ? "+" : ""}${((p / pctBase - 1) * 100).toFixed(2)}%`
+          : fmtPrice(p);
 
       // price grid + right-axis labels
       ctx.textAlign = "left";
@@ -343,7 +470,7 @@ export default function CandleChart({
         ctx.lineTo(L.right, Math.round(y) + 0.5);
         ctx.stroke();
         ctx.fillStyle = pal.axisText;
-        ctx.fillText(fmtPrice(p), L.right + 6, y);
+        ctx.fillText(fmtAxis(p), L.right + 6, y);
       }
 
       // time grid + bottom-axis labels
@@ -396,6 +523,134 @@ export default function CandleChart({
             ctx.fillStyle = c.close >= c.open ? pal.up : pal.down;
             ctx.fillRect(cx - vbW / 2, L.volBottom - barH, vbW, Math.max(1, barH));
           }
+          ctx.restore();
+        }
+      }
+
+      // ── indicator sub-panel: RSI or MACD (clipped to its band) ──
+      const ind = indicatorRef.current;
+      if (L.indH > 0 && ind !== "none" && cs.length > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(L.left, L.indTop, L.plotW, L.indH);
+        ctx.clip();
+
+        if (ind === "rsi") {
+          const rsi = computeRSI(cs, 14);
+          const yForRsi = (val: number) => L.indTop + ((100 - val) / 100) * L.indH;
+          ctx.strokeStyle = pal.gridSoft;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          for (const lvl of [30, 70]) {
+            const gy = yForRsi(lvl);
+            ctx.beginPath();
+            ctx.moveTo(L.left, Math.round(gy) + 0.5);
+            ctx.lineTo(L.right, Math.round(gy) + 0.5);
+            ctx.stroke();
+          }
+          ctx.setLineDash([]);
+          ctx.strokeStyle = pal.chipBg;
+          ctx.lineWidth = 1.5;
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          let started = false;
+          for (let i = drawFrom; i <= drawTo; i++) {
+            const val = rsi[i];
+            if (val == null) {
+              started = false;
+              continue;
+            }
+            const x = xForIndex(i + 0.5);
+            const y = yForRsi(val);
+            if (!started) {
+              ctx.moveTo(x, y);
+              started = true;
+            } else {
+              ctx.lineTo(x, y);
+            }
+          }
+          ctx.stroke();
+          ctx.restore();
+          ctx.fillStyle = pal.axisText;
+          ctx.textAlign = "left";
+          for (const lvl of [30, 70]) ctx.fillText(String(lvl), L.right + 6, yForRsi(lvl));
+          let lastRsi: number | null = null;
+          for (let i = rsi.length - 1; i >= 0; i--) {
+            if (rsi[i] != null) {
+              lastRsi = rsi[i];
+              break;
+            }
+          }
+          ctx.fillStyle = pal.legendLabel;
+          ctx.fillText(
+            `RSI 14${lastRsi != null ? `  ${lastRsi.toFixed(1)}` : ""}`,
+            L.left + 4,
+            L.indTop + 9
+          );
+        } else if (ind === "macd") {
+          const { macd, signal, hist } = computeMACD(cs);
+          let mn = Infinity;
+          let mx = -Infinity;
+          for (let i = Math.max(0, Math.floor(v.from)); i <= Math.min(cs.length - 1, Math.ceil(v.to)); i++) {
+            for (const arr of [macd, signal, hist]) {
+              const val = arr[i];
+              if (val != null) {
+                if (val < mn) mn = val;
+                if (val > mx) mx = val;
+              }
+            }
+          }
+          const mag = isFinite(mn) && isFinite(mx) ? Math.max(Math.abs(mn), Math.abs(mx)) || 1 : 1;
+          const span2 = 2 * mag;
+          const yForVal = (val: number) => L.indTop + ((mag - val) / span2) * L.indH;
+          const zeroY = yForVal(0);
+          const hw = Math.max(1, bw * 0.7);
+          ctx.globalAlpha = 0.5;
+          for (let i = drawFrom; i <= drawTo; i++) {
+            const hVal = hist[i];
+            if (hVal == null) continue;
+            const cx = xForIndex(i + 0.5);
+            const y = yForVal(hVal);
+            ctx.fillStyle = hVal >= 0 ? pal.up : pal.down;
+            ctx.fillRect(cx - hw / 2, Math.min(y, zeroY), hw, Math.max(1, Math.abs(y - zeroY)));
+          }
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = pal.gridSoft;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(L.left, Math.round(zeroY) + 0.5);
+          ctx.lineTo(L.right, Math.round(zeroY) + 0.5);
+          ctx.stroke();
+          const drawSeries = (arr: Array<number | null>, color: string) => {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            ctx.lineJoin = "round";
+            ctx.beginPath();
+            let started = false;
+            for (let i = drawFrom; i <= drawTo; i++) {
+              const val = arr[i];
+              if (val == null) {
+                started = false;
+                continue;
+              }
+              const x = xForIndex(i + 0.5);
+              const y = yForVal(val);
+              if (!started) {
+                ctx.moveTo(x, y);
+                started = true;
+              } else {
+                ctx.lineTo(x, y);
+              }
+            }
+            ctx.stroke();
+          };
+          drawSeries(macd, pal.ma[1]); // MACD line
+          drawSeries(signal, pal.ma[0]); // signal line
+          ctx.restore();
+          ctx.fillStyle = pal.legendLabel;
+          ctx.textAlign = "left";
+          ctx.fillText("MACD 12 26 9", L.left + 4, L.indTop + 9);
+        } else {
           ctx.restore();
         }
       }
@@ -507,7 +762,7 @@ export default function CandleChart({
           ctx.lineTo(L.right, Math.round(ly) + 0.5);
           ctx.stroke();
           ctx.restore();
-          const label = fmtPrice(lastC.close);
+          const label = fmtAxis(lastC.close);
           const tw = ctx.measureText(label).width;
           ctx.fillStyle = col;
           roundRect(ctx, L.right + 2, ly - 9, Math.min(tw + 10, PRICE_W - 4), 18, 5);
@@ -568,7 +823,7 @@ export default function CandleChart({
         ctx.restore();
 
         if (crosshair.y >= L.priceTop && crosshair.y <= L.priceBottom) {
-          const plabel = fmtPrice(priceForY(crosshair.y));
+          const plabel = fmtAxis(priceForY(crosshair.y));
           const tw = ctx.measureText(plabel).width;
           ctx.fillStyle = pal.chipBg;
           roundRect(ctx, L.right + 2, crosshair.y - 9, Math.min(tw + 10, PRICE_W - 4), 18, 5);
@@ -788,6 +1043,8 @@ export default function CandleChart({
     chartTypeRef.current = chartType;
     showVolumeRef.current = showVolume;
     masRef.current = mas;
+    priceScaleRef.current = priceScale;
+    indicatorRef.current = indicator;
     // currency is part of the props contract but the renderer formats numbers
     // without a currency symbol; reference it so the dep stays honest.
     void currency;
@@ -809,7 +1066,7 @@ export default function CandleChart({
     }
     prevLenRef.current = candles.length;
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicator]);
 
   return (
     <div ref={wrapRef} className={className}>
