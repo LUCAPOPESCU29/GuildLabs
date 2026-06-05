@@ -43,7 +43,7 @@ const PRICE_W = 60;
 const TIME_H = 22;
 const PAD = 10;
 
-export type ChartType = "candles" | "area";
+export type ChartType = "candles" | "hollow" | "heikin" | "area" | "baseline";
 
 // Price-axis mapping. "linear" is plain price; "log" spaces bars by log10(price)
 // so equal % moves take equal vertical space (good for long ranges / volatile
@@ -147,6 +147,26 @@ function computeSMA(cs: Candle[], period: number): Array<number | null> {
     sum += cs[i].close;
     if (i >= period) sum -= cs[i - period].close;
     if (i >= period - 1) out[i] = sum / period;
+  }
+  return out;
+}
+
+// Heikin-Ashi transform of an OHLC series (smoothed candles that emphasise trend).
+// haClose = (o+h+l+c)/4; haOpen = (prevHaOpen + prevHaClose)/2 (seed = (o+c)/2);
+// haHigh/haLow extend to include haOpen/haClose. Same length; volume passthrough.
+function computeHeikinAshi(cs: Candle[]): Candle[] {
+  const out: Candle[] = new Array(cs.length);
+  let prevOpen = 0;
+  let prevClose = 0;
+  for (let i = 0; i < cs.length; i++) {
+    const c = cs[i];
+    const haClose = (c.open + c.high + c.low + c.close) / 4;
+    const haOpen = i === 0 ? (c.open + c.close) / 2 : (prevOpen + prevClose) / 2;
+    const haHigh = Math.max(c.high, haOpen, haClose);
+    const haLow = Math.min(c.low, haOpen, haClose);
+    out[i] = { time: c.time, open: haOpen, high: haHigh, low: haLow, close: haClose, volume: c.volume };
+    prevOpen = haOpen;
+    prevClose = haClose;
   }
   return out;
 }
@@ -506,6 +526,15 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       ctx.font = FONT;
       ctx.textBaseline = "middle";
 
+      // hex (#rrggbb, as resolvePalette emits) → rgba() for translucent fills.
+      const toRgba = (hexColor: string, a: number) => {
+        const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hexColor);
+        const [r, g, b] = m
+          ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)]
+          : [120, 120, 120];
+        return `rgba(${r},${g},${b},${a})`;
+      };
+
       const { lo, hi } = priceRange();
       const span = hi - lo || 1;
       // Log positioning needs strictly-positive bounds; fall back to linear if a
@@ -755,26 +784,70 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       ctx.beginPath();
       ctx.rect(L.left, L.priceTop, L.plotW, L.pricePlotH);
       ctx.clip();
-      if (chartTypeRef.current === "area") {
-        // direction over the visible range tints the area green/purple
-        const vf = cs[Math.max(0, Math.min(cs.length - 1, Math.floor(v.from < 0 ? 0 : v.from)))];
-        const vl = cs[Math.min(cs.length - 1, Math.max(0, Math.ceil(v.to) - 1))];
-        const rising = !!vf && !!vl && vl.close >= vf.close;
-        const lineCol = rising ? pal.up : pal.down;
+      const ct = chartTypeRef.current;
+      if (ct === "area" || ct === "baseline") {
         const pts: Array<[number, number]> = [];
         for (let i = drawFrom; i <= drawTo; i++) {
           pts.push([xForIndex(i + 0.5), yForPrice(cs[i].close)]);
         }
-        if (pts.length > 0) {
+        if (pts.length > 0 && ct === "baseline") {
+          // Baseline: fill + line split around a reference price (first visible
+          // close). Above the line reads green, below reads violet.
+          const baseY = yForPrice(pctBase);
+          const fillSide = (clipTop: number, clipBot: number, color: string) => {
+            if (clipBot <= clipTop) return;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(L.left, clipTop, L.plotW, clipBot - clipTop);
+            ctx.clip();
+            const grad = ctx.createLinearGradient(0, L.priceTop, 0, L.priceBottom);
+            grad.addColorStop(0, toRgba(color, 0.28));
+            grad.addColorStop(1, toRgba(color, 0.02));
+            ctx.beginPath();
+            ctx.moveTo(pts[0][0], baseY);
+            for (const p of pts) ctx.lineTo(p[0], p[1]);
+            ctx.lineTo(pts[pts.length - 1][0], baseY);
+            ctx.closePath();
+            ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.restore();
+          };
+          const lineSide = (clipTop: number, clipBot: number, color: string) => {
+            if (clipBot <= clipTop) return;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(L.left, clipTop, L.plotW, clipBot - clipTop);
+            ctx.clip();
+            ctx.beginPath();
+            ctx.moveTo(pts[0][0], pts[0][1]);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            ctx.lineJoin = "round";
+            ctx.stroke();
+            ctx.restore();
+          };
+          fillSide(L.priceTop, baseY, pal.up);
+          fillSide(baseY, L.priceBottom, pal.down);
+          lineSide(L.priceTop, baseY, pal.up);
+          lineSide(baseY, L.priceBottom, pal.down);
+          ctx.save();
+          ctx.strokeStyle = pal.gridSoft;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.moveTo(L.left, Math.round(baseY) + 0.5);
+          ctx.lineTo(L.right, Math.round(baseY) + 0.5);
+          ctx.stroke();
+          ctx.restore();
+        } else if (pts.length > 0) {
+          // area: direction over the visible range tints the fill + line
+          const vf = cs[Math.max(0, Math.min(cs.length - 1, Math.floor(v.from < 0 ? 0 : v.from)))];
+          const vl = cs[Math.min(cs.length - 1, Math.max(0, Math.ceil(v.to) - 1))];
+          const rising = !!vf && !!vl && vl.close >= vf.close;
+          const lineCol = rising ? pal.up : pal.down;
           const grad = ctx.createLinearGradient(0, L.priceTop, 0, L.priceBottom);
-          const [gr, gg, gb] = (() => {
-            const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(lineCol);
-            return m
-              ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)]
-              : [120, 120, 120];
-          })();
-          grad.addColorStop(0, `rgba(${gr},${gg},${gb},0.32)`);
-          grad.addColorStop(1, `rgba(${gr},${gg},${gb},0.02)`);
+          grad.addColorStop(0, toRgba(lineCol, 0.32));
+          grad.addColorStop(1, toRgba(lineCol, 0.02));
           ctx.beginPath();
           ctx.moveTo(pts[0][0], pts[0][1]);
           for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
@@ -792,8 +865,12 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           ctx.stroke();
         }
       } else {
+        // candle-like: candles | hollow | heikin (HA uses a transformed series,
+        // but the crosshair legend below still reads the real OHLC from `cs`).
+        const src = ct === "heikin" ? computeHeikinAshi(cs) : cs;
+        const hollow = ct === "hollow";
         for (let i = drawFrom; i <= drawTo; i++) {
-          const c = cs[i];
+          const c = src[i];
           const cx = xForIndex(i + 0.5);
           if (cx < L.left - bw || cx > L.right + bw) continue;
           const up = c.close >= c.open;
@@ -806,8 +883,21 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           ctx.stroke();
           const yTop = yForPrice(Math.max(c.open, c.close));
           const yBot = yForPrice(Math.min(c.open, c.close));
-          ctx.fillStyle = color;
-          ctx.fillRect(cx - bodyW / 2, yTop, bodyW, Math.max(1, yBot - yTop));
+          const h = Math.max(1, yBot - yTop);
+          if (hollow && up) {
+            // hollow up-candle: outline only
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(
+              Math.round(cx - bodyW / 2) + 0.5,
+              Math.round(yTop) + 0.5,
+              Math.max(1, Math.round(bodyW) - 1),
+              Math.max(1, h - 1)
+            );
+          } else {
+            ctx.fillStyle = color;
+            ctx.fillRect(cx - bodyW / 2, yTop, bodyW, h);
+          }
         }
       }
 

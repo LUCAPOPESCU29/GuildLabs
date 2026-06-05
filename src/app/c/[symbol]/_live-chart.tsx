@@ -107,7 +107,8 @@ interface ChartPrefs {
   bb: boolean;
 }
 
-const isChartType = (v: unknown): v is ChartType => v === "candles" || v === "area";
+const isChartType = (v: unknown): v is ChartType =>
+  v === "candles" || v === "hollow" || v === "heikin" || v === "area" || v === "baseline";
 const isPriceScale = (v: unknown): v is PriceScale =>
   v === "linear" || v === "log" || v === "percent";
 const isIndicator = (v: unknown): v is Indicator =>
@@ -652,11 +653,14 @@ export default function LiveChart({
           {/* ── Chart controls: type · volume · MAs · search ──────────────── */}
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              {/* Candles ↔ Area */}
+              {/* Chart type: candles · hollow · Heikin-Ashi · area · baseline */}
               <div className="inline-flex rounded-full border border-card-border bg-card p-1">
                 {([
                   ["candles", "Candles", CandlestickChart],
+                  ["hollow", "Hollow", null],
+                  ["heikin", "HA", null],
                   ["area", "Area", AreaChart],
+                  ["baseline", "Base", null],
                 ] as const).map(([key, label, Icon]) => {
                   const active = chartType === key;
                   return (
@@ -670,8 +674,9 @@ export default function LiveChart({
                           : { color: "var(--muted-foreground)" }
                       }
                       aria-pressed={active}
+                      title={`${label} chart`}
                     >
-                      <Icon className="size-3.5" />
+                      {Icon ? <Icon className="size-3.5" /> : null}
                       {label}
                     </button>
                   );
