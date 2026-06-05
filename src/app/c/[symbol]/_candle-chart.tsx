@@ -66,6 +66,20 @@ export interface Candle {
   volume?: number | null;
 }
 
+// User drawings, stored in time/price space so they survive pan/zoom + re-fit.
+export type DrawTool = "cursor" | "hline" | "trend" | "fib" | "erase";
+interface Drawing {
+  id: string;
+  type: "hline" | "trend" | "fib";
+  points: Array<{ t: number; p: number }>; // hline: 1 point (price); trend/fib: 2
+}
+let _drawSeq = 0;
+function genDrawId(): string {
+  _drawSeq += 1;
+  return `d${Date.now().toString(36)}${_drawSeq}`;
+}
+const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 1];
+
 interface View {
   from: number; // left-most visible bar index (fractional, may be < 0)
   to: number; // right-most visible bar index (fractional, may exceed length)
@@ -405,6 +419,16 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
+  // Active drawing tool (React state for the toolbar; mirrored to a ref the
+  // imperative pointer handlers read).
+  const [tool, setTool] = React.useState<DrawTool>("cursor");
+  const toolRef = React.useRef<DrawTool>("cursor");
+  React.useEffect(() => {
+    toolRef.current = tool;
+    const c = canvasRef.current;
+    if (c) c.style.cursor = tool === "cursor" ? "" : tool === "erase" ? "not-allowed" : "crosshair";
+  }, [tool]);
+
   // Live state the imperative renderer reads/writes (never triggers re-render).
   const candlesRef = React.useRef<Candle[]>(candles);
   const intervalRef = React.useRef(interval);
@@ -567,6 +591,97 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       return v.from + ((x - L.left) / L.plotW) * (v.to - v.from);
     };
 
+    // ── drawings: persisted per symbol, stored in time/price space ──
+    let drawings: Drawing[] = [];
+    let pending: { type: "trend" | "fib"; points: Array<{ t: number; p: number }> } | null = null;
+    const pendingCursor = { x: 0, y: 0 };
+    // last price mapping, refreshed each draw so pointer handlers can invert it
+    const mapState = { priceTop: 0, pricePlotH: 1, lo: 0, hi: 1, useLog: false, logHi: 0, logSpan: 1 };
+    const drawKey = () => `chartit:drawings:${(symbolRef.current ?? "").toUpperCase()}`;
+    try {
+      const raw = typeof localStorage !== "undefined" ? localStorage.getItem(drawKey()) : null;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) drawings = parsed;
+      }
+    } catch {
+      // ignore corrupt storage
+    }
+    const saveDrawings = () => {
+      try {
+        localStorage.setItem(drawKey(), JSON.stringify(drawings));
+      } catch {
+        // storage disabled — non-fatal
+      }
+    };
+    const priceToY = (p: number) => {
+      const m = mapState;
+      return m.useLog && p > 0
+        ? m.priceTop + ((m.logHi - Math.log10(p)) / m.logSpan) * m.pricePlotH
+        : m.priceTop + ((m.hi - p) / ((m.hi - m.lo) || 1)) * m.pricePlotH;
+    };
+    const yToPrice = (y: number) => {
+      const m = mapState;
+      return m.useLog
+        ? Math.pow(10, m.logHi - ((y - m.priceTop) / m.pricePlotH) * m.logSpan)
+        : m.hi - ((y - m.priceTop) / m.pricePlotH) * ((m.hi - m.lo) || 1);
+    };
+    const timeToXc = (t: number) => {
+      const cs = candlesRef.current;
+      if (cs.length === 0) return layout().left;
+      if (t <= cs[0].time) return xForIndex(0.5);
+      if (t >= cs[cs.length - 1].time) return xForIndex(cs.length - 1 + 0.5);
+      let lo = 0;
+      let hi = cs.length - 1;
+      while (lo <= hi) {
+        const m = (lo + hi) >> 1;
+        if (cs[m].time < t) lo = m + 1;
+        else hi = m - 1;
+      }
+      const i1 = Math.max(0, hi);
+      const i2 = Math.min(cs.length - 1, lo);
+      const t1 = cs[i1].time;
+      const t2 = cs[i2].time;
+      const frac = t2 > t1 ? (t - t1) / (t2 - t1) : 0;
+      return xForIndex(i1 + frac + 0.5);
+    };
+    const xToTime = (x: number) => {
+      const cs = candlesRef.current;
+      if (cs.length === 0) return 0;
+      const i = Math.max(0, Math.min(cs.length - 1, Math.round(indexForX(x))));
+      return cs[i].time;
+    };
+    const distToSeg = (px: number, py: number, x1: number, y1: number, x2: number, y2: number) => {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len2 = dx * dx + dy * dy || 1;
+      let tt = ((px - x1) * dx + (py - y1) * dy) / len2;
+      tt = Math.max(0, Math.min(1, tt));
+      return Math.hypot(px - (x1 + tt * dx), py - (y1 + tt * dy));
+    };
+    const hitTestDrawing = (x: number, y: number): string | null => {
+      const tol = 6;
+      for (let k = drawings.length - 1; k >= 0; k--) {
+        const d = drawings[k];
+        if (d.type === "hline") {
+          if (Math.abs(y - priceToY(d.points[0].p)) <= tol) return d.id;
+        } else if (d.type === "trend" && d.points.length === 2) {
+          const x1 = timeToXc(d.points[0].t);
+          const y1 = priceToY(d.points[0].p);
+          const x2 = timeToXc(d.points[1].t);
+          const y2 = priceToY(d.points[1].p);
+          if (distToSeg(x, y, x1, y1, x2, y2) <= tol) return d.id;
+        } else if (d.type === "fib" && d.points.length === 2) {
+          const hiP = Math.max(d.points[0].p, d.points[1].p);
+          const loP = Math.min(d.points[0].p, d.points[1].p);
+          for (const lv of FIB_LEVELS) {
+            if (Math.abs(y - priceToY(hiP - (hiP - loP) * lv)) <= tol) return d.id;
+          }
+        }
+      }
+      return null;
+    };
+
     const priceRange = () => {
       const cs = candlesRef.current;
       const v = viewRef.current;
@@ -643,6 +758,15 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         useLog
           ? Math.pow(10, logHi - ((y - L.priceTop) / L.pricePlotH) * logSpan)
           : hi - ((y - L.priceTop) / L.pricePlotH) * span;
+
+      // expose the current price mapping so pointer handlers can invert clicks
+      mapState.priceTop = L.priceTop;
+      mapState.pricePlotH = L.pricePlotH;
+      mapState.lo = lo;
+      mapState.hi = hi;
+      mapState.useLog = useLog;
+      mapState.logHi = logHi;
+      mapState.logSpan = logSpan;
 
       // Percent mode relabels the price axis as % change from the left-most
       // visible bar's close; everything else (positioning) is unchanged.
@@ -1230,6 +1354,61 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         }
         ctx.stroke();
       }
+
+      // ── user drawings (hline / trend / fib) — inside the price clip ──
+      if (drawings.length > 0 || pending) {
+        ctx.lineJoin = "round";
+        ctx.setLineDash([]);
+        for (const d of drawings) {
+          ctx.strokeStyle = pal.chipBg;
+          ctx.lineWidth = 1.5;
+          if (d.type === "hline") {
+            const y = priceToY(d.points[0].p);
+            ctx.beginPath();
+            ctx.moveTo(L.left, Math.round(y) + 0.5);
+            ctx.lineTo(L.right, Math.round(y) + 0.5);
+            ctx.stroke();
+            ctx.fillStyle = pal.chipBg;
+            ctx.textAlign = "left";
+            ctx.fillText(fmtPrice(d.points[0].p), L.left + 4, y - 6);
+          } else if (d.type === "trend" && d.points.length === 2) {
+            ctx.beginPath();
+            ctx.moveTo(timeToXc(d.points[0].t), priceToY(d.points[0].p));
+            ctx.lineTo(timeToXc(d.points[1].t), priceToY(d.points[1].p));
+            ctx.stroke();
+          } else if (d.type === "fib" && d.points.length === 2) {
+            const x1 = timeToXc(d.points[0].t);
+            const x2 = timeToXc(d.points[1].t);
+            const xa = Math.min(x1, x2);
+            const xb = Math.max(x1, x2);
+            const hiP = Math.max(d.points[0].p, d.points[1].p);
+            const loP = Math.min(d.points[0].p, d.points[1].p);
+            for (const lv of FIB_LEVELS) {
+              const p = hiP - (hiP - loP) * lv;
+              const y = priceToY(p);
+              ctx.globalAlpha = 0.65;
+              ctx.beginPath();
+              ctx.moveTo(xa, Math.round(y) + 0.5);
+              ctx.lineTo(xb, Math.round(y) + 0.5);
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+              ctx.fillStyle = pal.legendLabel;
+              ctx.textAlign = "left";
+              ctx.fillText(`${(lv * 100).toFixed(1)}%  ${fmtPrice(p)}`, xa + 4, y - 5);
+            }
+          }
+        }
+        if (pending && pending.points.length === 1) {
+          ctx.strokeStyle = pal.chipBg;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(timeToXc(pending.points[0].t), priceToY(pending.points[0].p));
+          ctx.lineTo(pendingCursor.x, pendingCursor.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
       ctx.restore();
 
       // last-price dashed line + breathing dot + axis chip (subtle "live" cue)
@@ -1590,6 +1769,44 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       const px = relX(e.clientX);
       const py = relY(e.clientY);
       pointers.set(e.pointerId, { x: px, y: py });
+
+      // Drawing tools take priority over pan/measure on a single primary click.
+      const dt = toolRef.current;
+      if (dt !== "cursor" && pointers.size === 1 && !e.shiftKey) {
+        drag.on = false;
+        crosshair.on = false;
+        if (dt === "erase") {
+          const hit = hitTestDrawing(px, py);
+          if (hit) {
+            drawings = drawings.filter((d) => d.id !== hit);
+            saveDrawings();
+          }
+          schedule();
+          return;
+        }
+        const price = yToPrice(py);
+        const time = xToTime(px);
+        if (dt === "hline") {
+          drawings.push({ id: genDrawId(), type: "hline", points: [{ t: time, p: price }] });
+          saveDrawings();
+          schedule();
+          return;
+        }
+        // trend / fib: two clicks
+        if (!pending) {
+          pending = { type: dt, points: [{ t: time, p: price }] };
+          pendingCursor.x = px;
+          pendingCursor.y = py;
+        } else {
+          pending.points.push({ t: time, p: price });
+          drawings.push({ id: genDrawId(), type: pending.type, points: pending.points });
+          pending = null;
+          saveDrawings();
+        }
+        schedule();
+        return;
+      }
+
       if (pointers.size === 1) {
         if (e.shiftKey) {
           // Shift-drag = measure, not pan.
@@ -1633,6 +1850,13 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           v.to = v.from + newSpan;
         }
         pinchDist = dist;
+        schedule();
+        return;
+      }
+
+      if (pending) {
+        pendingCursor.x = x;
+        pendingCursor.y = y;
         schedule();
         return;
       }
@@ -1761,7 +1985,12 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           e.preventDefault();
           break;
         case "Escape":
-          if (typeof document !== "undefined" && document.fullscreenElement) document.exitFullscreen?.();
+          if (pending) {
+            pending = null;
+            schedule();
+          } else if (typeof document !== "undefined" && document.fullscreenElement) {
+            document.exitFullscreen?.();
+          }
           break;
       }
     };
@@ -1843,6 +2072,45 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   return (
     <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>
       <canvas ref={canvasRef} style={{ display: "block", touchAction: "none" }} />
+
+      {/* Drawing toolbar (bottom-left): cursor · h-line · trend · fib · erase */}
+      <div
+        className="absolute bottom-2 left-2 z-10 inline-flex items-center gap-0.5 rounded-full border border-card-border p-0.5"
+        style={{
+          background: "color-mix(in oklab, var(--card) 78%, transparent)",
+          backdropFilter: "blur(8px)",
+        }}
+      >
+        {(
+          [
+            ["cursor", "↖", "Cursor / pan"],
+            ["hline", "─", "Horizontal line"],
+            ["trend", "╱", "Trend line"],
+            ["fib", "≣", "Fibonacci retracement"],
+            ["erase", "⌫", "Erase (click a drawing)"],
+          ] as const
+        ).map(([key, glyph, label]) => {
+          const active = tool === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTool((t) => (t === key ? "cursor" : key))}
+              title={label}
+              aria-label={label}
+              aria-pressed={active}
+              className="flex h-6 w-6 items-center justify-center rounded-full font-mono text-xs transition-colors"
+              style={
+                active
+                  ? { background: "var(--success)", color: "#000" }
+                  : { color: "var(--muted-foreground)" }
+              }
+            >
+              {glyph}
+            </button>
+          );
+        })}
+      </div>
       <button
         type="button"
         onClick={() => apiRef.current?.reset()}
