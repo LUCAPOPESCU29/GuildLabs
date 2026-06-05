@@ -59,6 +59,29 @@ const RANGES = [
 
 type RangeKey = (typeof RANGES)[number]["key"];
 
+// Intraday ranges. Yahoo only serves these from non-datacenter IPs, so they
+// 429 from Vercel/Railway for stocks; crypto still works via CoinGecko's free
+// OHLC endpoint. We therefore offer 1D/5D only for crypto pairs and hide them
+// for stocks (whose intraday would otherwise just error out).
+const INTRADAY_RANGES = new Set<RangeKey>(["1d", "5d"]);
+
+// Crypto detection mirrored from the bot's CoinGecko provider (coingecko.js):
+// a known base paired with a supported quote currency. Kept in sync by hand —
+// it's a small, slow-moving list.
+const CRYPTO_BASES = new Set([
+  "BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "DOT", "LTC", "BCH", "LINK",
+  "MATIC", "AVAX", "UNI", "ATOM", "XLM", "ALGO", "VET", "FIL", "TRX", "ETC",
+  "BNB", "SHIB", "NEAR", "APT", "ARB", "OP", "SUI", "PEPE", "INJ", "RNDR",
+  "TON", "USDT", "USDC",
+]);
+const CRYPTO_VS = new Set(["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "BTC", "ETH"]);
+const CRYPTO_PAIR_RE = /^([A-Z0-9]{2,10})-([A-Z]{3,4})$/;
+
+function isCryptoSymbol(sym: string): boolean {
+  const m = sym.toUpperCase().match(CRYPTO_PAIR_RE);
+  return !!m && CRYPTO_BASES.has(m[1]) && CRYPTO_VS.has(m[2]);
+}
+
 // Polling cadence for the live feel. 10s is the sweet spot: noticeably alive
 // without hammering the data API. The page also pauses polling when the tab is
 // hidden (see load() guard) so background tabs aren't burning quota.
@@ -219,7 +242,13 @@ export default function LiveChart({
   initialRange: RangeKey;
 }) {
   const router = useRouter();
-  const [range, setRange] = React.useState<RangeKey>(initialRange);
+  // Stocks have no working intraday (Yahoo 429s datacenter IPs), so only crypto
+  // gets the 1D/5D tabs; everything else starts on (and is limited to) daily+.
+  const crypto = isCryptoSymbol(symbol);
+  const visibleRanges = crypto ? RANGES : RANGES.filter((r) => !INTRADAY_RANGES.has(r.key));
+  const [range, setRange] = React.useState<RangeKey>(() =>
+    !crypto && INTRADAY_RANGES.has(initialRange) ? "1mo" : initialRange
+  );
   const [data, setData] = React.useState<ChartData | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -431,7 +460,7 @@ export default function LiveChart({
           {/* ── Range tabs + live status ──────────────────────────────────── */}
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
             <div className="inline-flex rounded-full border border-card-border bg-card p-1">
-              {RANGES.map((r) => {
+              {visibleRanges.map((r) => {
                 const active = r.key === range;
                 return (
                   <button
