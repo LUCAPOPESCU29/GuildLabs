@@ -7,13 +7,13 @@ import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
 import CandleChart from "./_candle-chart";
 
-// Up/down map to the FORGE design system's signature accent pair — mint
-// (`--success`) for gains, coral (`--coral`) for losses — so the chart page
-// shares the rest of the site's palette and theme (light/dark) automatically.
+// Purple + green chart theme, drawn from the FORGE design tokens so the page
+// shares the site's palette and tracks light/dark automatically: green
+// (`--success`) for gains, violet (`--secondary`) for losses.
 const UP = "var(--success)";
-const DOWN = "var(--coral)";
+const DOWN = "var(--secondary)";
 const UP_GLOW = "color-mix(in oklab, var(--success) 38%, transparent)";
-const DOWN_GLOW = "color-mix(in oklab, var(--coral) 32%, transparent)";
+const DOWN_GLOW = "color-mix(in oklab, var(--secondary) 32%, transparent)";
 
 const CHARTIT_CLIENT_ID = "1511281770820145182";
 const INVITE_URL = `https://discord.com/oauth2/authorize?client_id=${CHARTIT_CLIENT_ID}&permissions=274877992960&scope=bot+applications.commands`;

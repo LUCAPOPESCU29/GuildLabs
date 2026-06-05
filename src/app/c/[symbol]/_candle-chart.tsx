@@ -14,10 +14,10 @@ import * as React from "react";
 
 // Colours are not hard-coded: they're resolved from the FORGE design tokens
 // (globals.css) at runtime so the chart shares the site's exact palette and
-// reacts to light/dark theme switches. Up/down use the brand's signature
-// mint (`--success`) + coral (`--coral`) accent pair; chrome (grid, axis text,
-// crosshair chips) maps to the same surface/foreground/primary tokens the rest
-// of the UI uses. See `resolvePalette()` in the mount effect.
+// reacts to light/dark theme switches. The chart runs a purple + green scheme:
+// green (`--success`) for up bars, violet (`--secondary`) for down bars, with
+// the blurple `--primary` on the crosshair chips. Grid / axis text map to the
+// same surface/foreground tokens the rest of the UI uses. See `resolvePalette()`.
 const FONT = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, monospace";
 
 interface Palette {
@@ -175,7 +175,7 @@ export default function CandleChart({
       const border = tok("--card-border", "#3a3a55");
       return {
         up: hex(tok("--success", "oklch(0.78 0.15 158)")),
-        down: hex(tok("--coral", "oklch(0.76 0.16 18)")),
+        down: hex(tok("--secondary", "oklch(0.72 0.16 300)")),
         grid: rgba(border, 0.55),
         gridSoft: rgba(border, 0.3),
         axisText: hex(tok("--muted-foreground", "rgba(255,255,255,0.6)")),
