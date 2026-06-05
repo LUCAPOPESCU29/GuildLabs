@@ -231,6 +231,7 @@ interface ChartData {
   // First candle the user asked to see; the array may start earlier (warmup bars
   // so indicators are defined across the visible window). Undefined = no warmup.
   displayStartTime?: number;
+  events?: Array<{ time: number; type: "div" | "split"; text: string }>;
 }
 
 // ── Formatting helpers ───────────────────────────────────────────────────────
@@ -1002,6 +1003,7 @@ export default function LiveChart({
                   bollinger={bollinger}
                   symbol={(data.symbol ?? symbol).toUpperCase()}
                   compare={compareData}
+                  events={data.events}
                   displayStartTime={data.displayStartTime}
                   className="absolute inset-0"
                 />

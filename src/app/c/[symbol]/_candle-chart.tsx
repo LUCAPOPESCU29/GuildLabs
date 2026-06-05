@@ -99,6 +99,7 @@ interface CandleChartProps {
   bollinger?: boolean; // Bollinger Bands (20, 2σ) overlay on the price series
   symbol?: string; // primary ticker (for drawings key + compare legend)
   compare?: { symbol: string; candles: Candle[] } | null; // overlay (normalized %)
+  events?: Array<{ time: number; type: "div" | "split"; text: string }>; // div/split pins
   onToggleFullscreen?: () => void; // invoked by the "F" shortcut
   // UTC seconds of the first candle to *show*. The `candles` array may extend
   // earlier (warmup bars so RSI/MACD/MA are fully defined across the visible
@@ -411,6 +412,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     bollinger = false,
     symbol,
     compare,
+    events,
     onToggleFullscreen,
     displayStartTime,
   },
@@ -443,6 +445,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const bollingerRef = React.useRef<boolean>(bollinger);
   const symbolRef = React.useRef<string | undefined>(symbol);
   const compareRef = React.useRef<{ symbol: string; candles: Candle[] } | null | undefined>(compare);
+  const eventsRef = React.useRef(events);
   const onFsRef = React.useRef(onToggleFullscreen);
   const displayStartRef = React.useRef<number | undefined>(displayStartTime);
 
@@ -1685,6 +1688,43 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         }
       }
 
+      // ── dividend / split markers on the time axis ──
+      const evs = eventsRef.current;
+      if (evs && evs.length > 0 && cs.length > 0) {
+        const tFrom = cs[Math.max(0, Math.floor(v.from))]?.time ?? cs[0].time;
+        const tTo = cs[Math.min(cs.length - 1, Math.ceil(v.to))]?.time ?? cs[cs.length - 1].time;
+        const r = 7;
+        const my = L.bottom - r - 2;
+        ctx.textBaseline = "middle";
+        for (const ev of evs) {
+          if (ev.time < tFrom || ev.time > tTo) continue;
+          const x = timeToXc(ev.time);
+          if (x < L.left || x > L.right) continue;
+          ctx.beginPath();
+          ctx.arc(x, my, r, 0, Math.PI * 2);
+          ctx.fillStyle = ev.type === "div" ? pal.up : pal.chipBg;
+          ctx.globalAlpha = 0.9;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = pal.onColorText;
+          ctx.textAlign = "center";
+          ctx.font = "bold 10px ui-monospace, monospace";
+          ctx.fillText(ev.type === "div" ? "D" : "S", x, my + 0.5);
+          ctx.font = FONT;
+          if (crosshair.on && Math.abs(crosshair.x - x) <= r + 2) {
+            const tw = ctx.measureText(ev.text).width;
+            const bx = Math.max(L.left, Math.min(x - tw / 2 - 6, L.right - tw - 12));
+            const byy = my - r - 22;
+            roundRect(ctx, bx, byy, tw + 12, 18, 5);
+            ctx.fillStyle = pal.chipBg;
+            ctx.fill();
+            ctx.fillStyle = pal.chipText;
+            ctx.textAlign = "left";
+            ctx.fillText(ev.text, bx + 6, byy + 9);
+          }
+        }
+      }
+
       // ── measure tool overlay (shift-drag) ──
       if (measure.on) {
         const { x1, y1, x2, y2 } = measure;
@@ -2117,6 +2157,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     bollingerRef.current = bollinger;
     symbolRef.current = symbol;
     compareRef.current = compare;
+    eventsRef.current = events;
     onFsRef.current = onToggleFullscreen;
     displayStartRef.current = displayStartTime;
     // currency is part of the props contract but the renderer formats numbers
@@ -2147,7 +2188,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     }
     prevLenRef.current = candles.length;
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicators, bollinger, symbol, compare, onToggleFullscreen, displayStartTime]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicators, bollinger, symbol, compare, events, onToggleFullscreen, displayStartTime]);
 
   return (
     <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>

@@ -109,6 +109,8 @@ export interface ChartData {
   // defined across the visible window); the chart starts its view here and keeps
   // the warmup off-screen but pannable. Undefined when no warmup was fetched.
   displayStartTime?: number;
+  // Corporate-action markers (Yahoo only): dividends + splits, for on-chart pins.
+  events?: Array<{ time: number; type: "div" | "split"; text: string }>;
 }
 
 const HOSTS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"];
@@ -212,6 +214,7 @@ async function fetchYahoo(symbol: string, yahooRange: string, interval: string):
       range: yahooRange,
       interval,
       includePrePost: "false",
+      events: "div,split",
     });
     if (crumb) qs.set("crumb", crumb);
     return `/v8/finance/chart/${encodeURIComponent(symbol)}?${qs}`;
@@ -627,6 +630,10 @@ async function getChartDataFromYahoo(symbol: string, range: Range): Promise<Char
         meta?: Record<string, unknown>;
         timestamp?: number[];
         indicators?: { quote?: Array<Record<string, Array<number | null>>> };
+        events?: {
+          dividends?: Record<string, { amount?: number; date?: number }>;
+          splits?: Record<string, { date?: number; splitRatio?: string }>;
+        };
       }>;
       error?: { description?: string } | null;
     };
@@ -675,6 +682,31 @@ async function getChartDataFromYahoo(symbol: string, range: Range): Promise<Char
   const changePercent =
     change != null && prevClose ? (change / prevClose) * 100 : null;
 
+  // Corporate-action markers (dividends + splits) within the fetched window.
+  const events: ChartData["events"] = [];
+  const evDiv = result.events?.dividends;
+  if (evDiv) {
+    for (const k of Object.keys(evDiv)) {
+      const d = evDiv[k];
+      const t = num(d?.date) ?? Number(k);
+      const amt = num(d?.amount);
+      if (Number.isFinite(t) && amt != null) {
+        events.push({ time: Math.floor(t), type: "div", text: `Dividend ${amt}` });
+      }
+    }
+  }
+  const evSplit = result.events?.splits;
+  if (evSplit) {
+    for (const k of Object.keys(evSplit)) {
+      const s = evSplit[k];
+      const t = num(s?.date) ?? Number(k);
+      if (Number.isFinite(t)) {
+        events.push({ time: Math.floor(t), type: "split", text: `Split ${s?.splitRatio ?? ""}`.trim() });
+      }
+    }
+  }
+  events.sort((a, b) => a.time - b.time);
+
   return {
     symbol: String(meta.symbol ?? symbol).toUpperCase(),
     name: String(
@@ -695,5 +727,6 @@ async function getChartDataFromYahoo(symbol: string, range: Range): Promise<Char
     rangeLabel: cfg.label,
     candles,
     displayStartTime: displayStartSeconds(range),
+    events: events.length > 0 ? events : undefined,
   };
 }
