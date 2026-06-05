@@ -110,6 +110,8 @@ interface ChartPrefs {
   scale: PriceScale;
   ind: Indicator[];
   bb: boolean;
+  vwap: boolean;
+  vp: boolean;
 }
 
 const isChartType = (v: unknown): v is ChartType =>
@@ -149,6 +151,8 @@ function readStoredPrefs(): Partial<ChartPrefs> {
     const ind = sanitizeIndicators(p.ind);
     if (ind) out.ind = ind;
     if (typeof p.bb === "boolean") out.bb = p.bb;
+    if (typeof p.vwap === "boolean") out.vwap = p.vwap;
+    if (typeof p.vp === "boolean") out.vp = p.vp;
     const ma = sanitizeMas(p.ma);
     if (ma) out.ma = ma;
     return out;
@@ -175,6 +179,10 @@ function readUrlPrefs(): Partial<ChartPrefs> {
   }
   const bb = q.get("bb");
   if (bb === "0" || bb === "1") out.bb = bb === "1";
+  const vwap = q.get("vwap");
+  if (vwap === "0" || vwap === "1") out.vwap = vwap === "1";
+  const vp = q.get("vp");
+  if (vp === "0" || vp === "1") out.vp = vp === "1";
   const ma = q.get("ma");
   if (ma != null) {
     const parsed = sanitizeMas(ma.split(",").map((s) => Number(s.trim())));
@@ -376,6 +384,8 @@ export default function LiveChart({
   const [priceScale, setPriceScale] = React.useState<PriceScale>("linear");
   const [indicators, setIndicators] = React.useState<Indicator[]>([]);
   const [bollinger, setBollinger] = React.useState(false);
+  const [vwap, setVwap] = React.useState(false);
+  const [volumeProfile, setVolumeProfile] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
   const [compareSymbol, setCompareSymbol] = React.useState<string | null>(null);
   const [compareData, setCompareData] = React.useState<{ symbol: string; candles: Candle[] } | null>(null);
@@ -533,6 +543,8 @@ export default function LiveChart({
     if (p.scale != null) setPriceScale(p.scale);
     if (p.ind != null) setIndicators(p.ind);
     if (p.bb != null) setBollinger(p.bb);
+    if (p.vwap != null) setVwap(p.vwap);
+    if (p.vp != null) setVolumeProfile(p.vp);
     // compare ticker rides the URL only (not localStorage)
     const cmp = new URLSearchParams(window.location.search).get("cmp");
     if (cmp) setCompareSymbol(cmp.toUpperCase());
@@ -550,12 +562,14 @@ export default function LiveChart({
         scale: priceScale,
         ind: indicators,
         bb: bollinger,
+        vwap,
+        vp: volumeProfile,
       };
       window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     } catch {
       // storage full / disabled — non-fatal
     }
-  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger]);
+  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile]);
 
   // Build a shareable deep link encoding the current view, copy to clipboard.
   const onShare = React.useCallback(() => {
@@ -568,6 +582,8 @@ export default function LiveChart({
     params.set("scale", priceScale);
     if (indicators.length) params.set("ind", indicators.join(","));
     if (bollinger) params.set("bb", "1");
+    if (vwap) params.set("vwap", "1");
+    if (volumeProfile) params.set("vp", "1");
     if (compareSymbol) params.set("cmp", compareSymbol);
     const url = `${window.location.origin}/c/${encodeURIComponent(symbol)}?${params}`;
     const done = () => {
@@ -576,7 +592,7 @@ export default function LiveChart({
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     };
     navigator.clipboard?.writeText(url).then(done).catch(done);
-  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, compareSymbol, symbol]);
+  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, compareSymbol, symbol]);
 
   // ── Price flash on tick ────────────────────────────────────────────────────
   // The CandleChart owns all rendering; here we only watch the price for the
@@ -881,6 +897,31 @@ export default function LiveChart({
                 BB
               </button>
 
+              {/* VWAP + Volume Profile toggles */}
+              {([
+                ["VWAP", vwap, () => setVwap((s) => !s), "Volume-weighted average price"],
+                ["VP", volumeProfile, () => setVolumeProfile((s) => !s), "Volume profile (volume-at-price)"],
+              ] as const).map(([label, active, onClick, title]) => (
+                <button
+                  key={label}
+                  onClick={onClick}
+                  className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                  style={
+                    active
+                      ? { background: UP, color: "#000", borderColor: "transparent" }
+                      : {
+                          background: "var(--card)",
+                          color: "var(--muted-foreground)",
+                          borderColor: "var(--card-border)",
+                        }
+                  }
+                  aria-pressed={active}
+                  title={title}
+                >
+                  {label}
+                </button>
+              ))}
+
               {/* Share current view */}
               <button
                 onClick={onShare}
@@ -1004,6 +1045,8 @@ export default function LiveChart({
                   symbol={(data.symbol ?? symbol).toUpperCase()}
                   compare={compareData}
                   events={data.events}
+                  vwap={vwap}
+                  volumeProfile={volumeProfile}
                   displayStartTime={data.displayStartTime}
                   className="absolute inset-0"
                 />

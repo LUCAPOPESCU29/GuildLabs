@@ -67,11 +67,24 @@ export interface Candle {
 }
 
 // User drawings, stored in time/price space so they survive pan/zoom + re-fit.
-export type DrawTool = "cursor" | "hline" | "trend" | "fib" | "erase";
+export type DrawTool =
+  | "cursor"
+  | "hline"
+  | "trend"
+  | "fib"
+  | "avwap"
+  | "vline"
+  | "rect"
+  | "ray"
+  | "arrow"
+  | "text"
+  | "erase";
 interface Drawing {
   id: string;
-  type: "hline" | "trend" | "fib";
-  points: Array<{ t: number; p: number }>; // hline: 1 point (price); trend/fib: 2
+  type: "hline" | "trend" | "fib" | "avwap" | "vline" | "rect" | "ray" | "arrow" | "text";
+  points: Array<{ t: number; p: number }>; // hline/vline/avwap/text: 1 point; others: 2
+  color?: string;
+  text?: string; // for the text annotation
 }
 let _drawSeq = 0;
 function genDrawId(): string {
@@ -102,6 +115,8 @@ interface CandleChartProps {
   symbol?: string; // primary ticker (for drawings key + compare legend)
   compare?: { symbol: string; candles: Candle[] } | null; // overlay (normalized %)
   events?: Array<{ time: number; type: "div" | "split"; text: string }>; // div/split pins
+  vwap?: boolean; // session VWAP overlay on price
+  volumeProfile?: boolean; // volume-at-price histogram on the right edge
   onToggleFullscreen?: () => void; // invoked by the "F" shortcut
   // UTC seconds of the first candle to *show*. The `candles` array may extend
   // earlier (warmup bars so RSI/MACD/MA are fully defined across the visible
@@ -167,6 +182,20 @@ function computeSMA(cs: Candle[], period: number): Array<number | null> {
   for (let i = 0; i < cs.length; i++) {
     sum += cs[i].close;
     if (i >= period) sum -= cs[i - period].close;
+    if (i >= period - 1) out[i] = sum / period;
+  }
+  return out;
+}
+
+// Simple moving average of per-bar volume (null bars count as 0). Same length.
+function computeVolMA(cs: Candle[], period = 20): Array<number | null> {
+  const out: Array<number | null> = new Array(cs.length).fill(null);
+  if (period <= 0 || cs.length < period) return out;
+  let sum = 0;
+  const vol = (i: number) => (typeof cs[i].volume === "number" ? (cs[i].volume as number) : 0);
+  for (let i = 0; i < cs.length; i++) {
+    sum += vol(i);
+    if (i >= period) sum -= vol(i - period);
     if (i >= period - 1) out[i] = sum / period;
   }
   return out;
@@ -415,6 +444,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     symbol,
     compare,
     events,
+    vwap = false,
+    volumeProfile = false,
     onToggleFullscreen,
     displayStartTime,
   },
@@ -448,6 +479,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const symbolRef = React.useRef<string | undefined>(symbol);
   const compareRef = React.useRef<{ symbol: string; candles: Candle[] } | null | undefined>(compare);
   const eventsRef = React.useRef(events);
+  const vwapRef = React.useRef(vwap);
+  const volProfileRef = React.useRef(volumeProfile);
   const onFsRef = React.useRef(onToggleFullscreen);
   const displayStartRef = React.useRef<number | undefined>(displayStartTime);
 
@@ -574,6 +607,37 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       return flags;
     };
 
+    // VWAP over the candle array. resetDaily restarts the accumulation at each new
+    // ET session (detected by ET minutes dropping vs the prior bar); anchorTime
+    // starts accumulation at a chosen bar. typical = (h+l+c)/3.
+    const computeVWAP = (anchorTime?: number, resetDaily?: boolean): Array<number | null> => {
+      const cs = candlesRef.current;
+      const out: Array<number | null> = new Array(cs.length).fill(null);
+      let pv = 0;
+      let vol = 0;
+      let prevMin = -1;
+      for (let i = 0; i < cs.length; i++) {
+        if (resetDaily) {
+          const mn = etMinutes(cs[i].time);
+          if (mn != null) {
+            if (prevMin >= 0 && mn < prevMin) {
+              pv = 0;
+              vol = 0;
+            }
+            prevMin = mn;
+          }
+        }
+        if (anchorTime != null && cs[i].time < anchorTime) continue;
+        const c = cs[i];
+        const typ = (c.high + c.low + c.close) / 3;
+        const v = typeof c.volume === "number" ? (c.volume as number) : 0;
+        pv += typ * v;
+        vol += v;
+        out[i] = vol > 0 ? pv / vol : null;
+      }
+      return out;
+    };
+
     const layout = () => {
       const top = PAD;
       const bottom = size.h - TIME_H;
@@ -633,7 +697,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
 
     // ── drawings: persisted per symbol, stored in time/price space ──
     let drawings: Drawing[] = [];
-    let pending: { type: "trend" | "fib"; points: Array<{ t: number; p: number }> } | null = null;
+    let pending: { type: Drawing["type"]; points: Array<{ t: number; p: number }> } | null = null;
     const pendingCursor = { x: 0, y: 0 };
     // selection + endpoint/body editing (cursor tool)
     let selectedId: string | null = null;
@@ -722,6 +786,11 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           for (const lv of FIB_ALL) {
             if (Math.abs(y - priceToY(p1 + (p2 - p1) * lv)) <= tol) return d.id;
           }
+        } else if (d.type === "avwap") {
+          const vw = computeVWAP(d.points[0].t, false);
+          const idx = Math.max(0, Math.min(candlesRef.current.length - 1, Math.round(indexForX(x))));
+          const val = vw[idx];
+          if (val != null && Math.abs(y - priceToY(val)) <= tol) return d.id;
         }
       }
       return null;
@@ -946,11 +1015,11 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         }
         if (volMax > 0) {
           const vbW = Math.max(1, bw * 0.7);
+          const volMa = computeVolMA(cs, 20);
           ctx.save();
           ctx.beginPath();
           ctx.rect(L.left, L.volTop, L.plotW, L.volH);
           ctx.clip();
-          ctx.globalAlpha = 0.45;
           for (let i = drawFrom; i <= drawTo; i++) {
             const c = cs[i];
             const vol = c.volume;
@@ -958,9 +1027,33 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             const cx = xForIndex(i + 0.5);
             if (cx < L.left - bw || cx > L.right + bw) continue;
             const barH = (vol / volMax) * L.volH;
+            const avg = volMa[i];
+            // spike (≥2× the vol-MA) draws solid; normal bars stay translucent
+            ctx.globalAlpha = avg != null && vol >= 2 * avg ? 0.9 : 0.45;
             ctx.fillStyle = c.close >= c.open ? pal.up : pal.down;
             ctx.fillRect(cx - vbW / 2, L.volBottom - barH, vbW, Math.max(1, barH));
           }
+          // volume MA line
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = pal.ma[0];
+          ctx.lineWidth = 1.5;
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          let vstarted = false;
+          for (let i = drawFrom; i <= drawTo; i++) {
+            const avg = volMa[i];
+            if (avg == null) {
+              vstarted = false;
+              continue;
+            }
+            const x = xForIndex(i + 0.5);
+            const y = L.volBottom - (avg / volMax) * L.volH;
+            if (!vstarted) {
+              ctx.moveTo(x, y);
+              vstarted = true;
+            } else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
           ctx.restore();
         }
       }
@@ -1160,6 +1253,60 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             drawSingle(pane, computeATR(cs, 14), pal.ma[2] ?? pal.chipBg, "ATR 14", (n) => fmtPrice(n));
           } else if (kind === "obv") {
             drawSingle(pane, computeOBV(cs), pal.ma[1], "OBV", (n) => fmtVol(n));
+          }
+        }
+      }
+
+      // ── volume profile (volume-at-price), behind the price series ──
+      if (volProfileRef.current && cs.length > 0) {
+        const a = Math.max(0, Math.floor(v.from));
+        const b = Math.min(cs.length - 1, Math.ceil(v.to));
+        let plo = Infinity;
+        let phi = -Infinity;
+        for (let i = a; i <= b; i++) {
+          if (cs[i].low < plo) plo = cs[i].low;
+          if (cs[i].high > phi) phi = cs[i].high;
+        }
+        if (isFinite(plo) && isFinite(phi) && phi > plo) {
+          const BINS = 24;
+          const buckets = new Array<number>(BINS).fill(0);
+          const binOf = (price: number) =>
+            Math.max(0, Math.min(BINS - 1, Math.floor(((price - plo) / (phi - plo)) * BINS)));
+          for (let i = a; i <= b; i++) {
+            const vol = typeof cs[i].volume === "number" ? (cs[i].volume as number) : 0;
+            if (vol <= 0) continue;
+            buckets[binOf((cs[i].high + cs[i].low + cs[i].close) / 3)] += vol;
+          }
+          const maxB = Math.max(...buckets);
+          const total = buckets.reduce((s, x) => s + x, 0);
+          if (maxB > 0 && total > 0) {
+            const pocIdx = buckets.indexOf(maxB);
+            // value area: grow around POC until ≥70% of total volume
+            let loB = pocIdx;
+            let hiB = pocIdx;
+            let acc = buckets[pocIdx];
+            while (acc < total * 0.7 && (loB > 0 || hiB < BINS - 1)) {
+              const left = loB > 0 ? buckets[loB - 1] : -1;
+              const right = hiB < BINS - 1 ? buckets[hiB + 1] : -1;
+              if (right >= left) acc += buckets[++hiB];
+              else acc += buckets[--loB];
+            }
+            const maxW = L.plotW * 0.28;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(L.left, L.priceTop, L.plotW, L.pricePlotH);
+            ctx.clip();
+            for (let bi = 0; bi < BINS; bi++) {
+              const w = (buckets[bi] / maxB) * maxW;
+              if (w <= 0) continue;
+              const yTop = yForPrice(plo + ((bi + 1) / BINS) * (phi - plo));
+              const yBot = yForPrice(plo + (bi / BINS) * (phi - plo));
+              const inVA = bi >= loB && bi <= hiB;
+              ctx.fillStyle =
+                bi === pocIdx ? toRgba(pal.chipBg, 0.5) : inVA ? toRgba(pal.cross, 0.35) : toRgba(pal.cross, 0.16);
+              ctx.fillRect(L.right - w, yTop, w, Math.max(1, yBot - yTop));
+            }
+            ctx.restore();
           }
         }
       }
@@ -1393,6 +1540,65 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           }
           ctx.stroke();
         }
+      }
+
+      // ── session VWAP overlay (dashed) ──
+      if (vwapRef.current) {
+        const vw = computeVWAP(undefined, intra);
+        ctx.strokeStyle = pal.ma[1];
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = "round";
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        let vstarted = false;
+        for (let i = drawFrom; i <= drawTo; i++) {
+          const val = vw[i];
+          if (val == null) {
+            vstarted = false;
+            continue;
+          }
+          const x = xForIndex(i + 0.5);
+          const y = yForPrice(val);
+          if (!vstarted) {
+            ctx.moveTo(x, y);
+            vstarted = true;
+          } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // ── anchored VWAP drawings (one line each, from their anchor forward) ──
+      for (const d of drawings) {
+        if (d.type !== "avwap") continue;
+        const vw = computeVWAP(d.points[0].t, false);
+        ctx.strokeStyle = d.color ?? pal.ma[2] ?? pal.chipBg;
+        ctx.lineWidth = d.id === selectedId ? 2.5 : 1.5;
+        ctx.lineJoin = "round";
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        let astarted = false;
+        for (let i = drawFrom; i <= drawTo; i++) {
+          const val = vw[i];
+          if (val == null) {
+            astarted = false;
+            continue;
+          }
+          const x = xForIndex(i + 0.5);
+          const y = yForPrice(val);
+          if (!astarted) {
+            ctx.moveTo(x, y);
+            astarted = true;
+          } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // anchor marker
+        const ax = timeToXc(d.points[0].t);
+        ctx.fillStyle = d.color ?? pal.ma[2] ?? pal.chipBg;
+        ctx.beginPath();
+        ctx.arc(ax, yForPrice(d.points[0].p), 3, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       // ── compare overlay: a 2nd ticker normalized to % from the first visible
@@ -1630,7 +1836,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       // ── always-on overlay legend (top-left, first row): MAs + Bollinger + compare ──
       const maPeriods = masRef.current;
       const hasOverlayLegend =
-        maPeriods.length > 0 || bollingerRef.current || !!compareRef.current;
+        maPeriods.length > 0 || bollingerRef.current || !!compareRef.current || vwapRef.current;
       if (hasOverlayLegend && cs.length > 0) {
         ctx.textAlign = "left";
         let mlx = L.left + 4;
@@ -1664,6 +1870,20 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           }
           ctx.fillStyle = pal.ma[2] ?? pal.chipBg;
           const label = `BB 20 2${extra}`;
+          ctx.fillText(label, mlx, mly);
+          mlx += ctx.measureText(label).width + 12;
+        }
+        if (vwapRef.current) {
+          const vw = computeVWAP(undefined, intra);
+          let last: number | null = null;
+          for (let i = vw.length - 1; i >= 0; i--) {
+            if (vw[i] != null) {
+              last = vw[i];
+              break;
+            }
+          }
+          ctx.fillStyle = pal.ma[1];
+          const label = `VWAP${last != null ? `  ${fmtPrice(last)}` : ""}`;
           ctx.fillText(label, mlx, mly);
           mlx += ctx.measureText(label).width + 12;
         }
@@ -1994,16 +2214,30 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           schedule();
           return;
         }
-        if (dt === "hline") {
-          drawings.push({ id: genDrawId(), type: "hline", points: [{ t: xToTime(px), p: yToPrice(py) }] });
+        // single-click tools: hline, vline, avwap, text
+        if (dt === "hline" || dt === "vline" || dt === "avwap" || dt === "text") {
+          const d: Drawing = {
+            id: genDrawId(),
+            type: dt,
+            points: [{ t: xToTime(px), p: yToPrice(py) }],
+          };
+          if (dt === "text") {
+            const label = typeof prompt === "function" ? prompt("Note text:")?.trim() : "";
+            if (!label) {
+              schedule();
+              return;
+            }
+            d.text = label;
+          }
+          drawings.push(d);
           saveDrawings();
           schedule();
           return;
         }
-        // trend / fib: two clicks, snapped to nearby pivots
+        // two-click tools: trend, fib, ray, arrow, rect — snapped to nearby pivots
         const snapped = snapPoint(px, py);
         if (!pending) {
-          pending = { type: dt, points: [snapped] };
+          pending = { type: dt as Drawing["type"], points: [snapped] };
           pendingCursor.x = px;
           pendingCursor.y = py;
         } else {
@@ -2345,6 +2579,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     symbolRef.current = symbol;
     compareRef.current = compare;
     eventsRef.current = events;
+    vwapRef.current = vwap;
+    volProfileRef.current = volumeProfile;
     onFsRef.current = onToggleFullscreen;
     displayStartRef.current = displayStartTime;
     // currency is part of the props contract but the renderer formats numbers
@@ -2375,7 +2611,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     }
     prevLenRef.current = candles.length;
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicators, bollinger, symbol, compare, events, onToggleFullscreen, displayStartTime]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicators, bollinger, symbol, compare, events, vwap, volumeProfile, onToggleFullscreen, displayStartTime]);
 
   return (
     <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>
@@ -2391,10 +2627,11 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       >
         {(
           [
-            ["cursor", "↖", "Cursor / pan"],
+            ["cursor", "↖", "Cursor / select / pan"],
             ["hline", "─", "Horizontal line"],
             ["trend", "╱", "Trend line"],
             ["fib", "≣", "Fibonacci retracement"],
+            ["avwap", "⩒", "Anchored VWAP"],
             ["erase", "⌫", "Erase (click a drawing)"],
           ] as const
         ).map(([key, glyph, label]) => {
