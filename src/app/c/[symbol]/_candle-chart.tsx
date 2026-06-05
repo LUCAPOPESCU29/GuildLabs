@@ -81,6 +81,7 @@ interface CandleChartProps {
   mas?: number[]; // SMA periods to overlay, e.g. [20, 50]; empty = none
   priceScale?: PriceScale;
   indicator?: Indicator; // oscillator sub-panel below the chart
+  bollinger?: boolean; // Bollinger Bands (20, 2σ) overlay on the price series
   // UTC seconds of the first candle to *show*. The `candles` array may extend
   // earlier (warmup bars so RSI/MACD/MA are fully defined across the visible
   // window); the initial view starts here and the warmup stays off-screen but
@@ -143,6 +144,41 @@ function computeSMA(cs: Candle[], period: number): Array<number | null> {
     if (i >= period - 1) out[i] = sum / period;
   }
   return out;
+}
+
+// Bollinger Bands: mid = SMA(period), upper/lower = mid ± mult·σ where σ is the
+// population standard deviation of the last `period` closes. Same-length, null-
+// padded arrays (correct on short ranges thanks to the warmup bars).
+function computeBollinger(
+  cs: Candle[],
+  period = 20,
+  mult = 2
+): { mid: Array<number | null>; upper: Array<number | null>; lower: Array<number | null> } {
+  const mid: Array<number | null> = new Array(cs.length).fill(null);
+  const upper: Array<number | null> = new Array(cs.length).fill(null);
+  const lower: Array<number | null> = new Array(cs.length).fill(null);
+  if (period <= 0 || cs.length < period) return { mid, upper, lower };
+  let sum = 0;
+  let sumSq = 0;
+  for (let i = 0; i < cs.length; i++) {
+    const c = cs[i].close;
+    sum += c;
+    sumSq += c * c;
+    if (i >= period) {
+      const old = cs[i - period].close;
+      sum -= old;
+      sumSq -= old * old;
+    }
+    if (i >= period - 1) {
+      const mean = sum / period;
+      const variance = Math.max(0, sumSq / period - mean * mean); // guard fp drift
+      const sd = Math.sqrt(variance);
+      mid[i] = mean;
+      upper[i] = mean + mult * sd;
+      lower[i] = mean - mult * sd;
+    }
+  }
+  return { mid, upper, lower };
 }
 
 // Wilder's RSI over close prices. Returns same-length array; nulls until the
@@ -261,6 +297,7 @@ export default function CandleChart({
   mas = [],
   priceScale = "linear",
   indicator = "none",
+  bollinger = false,
   displayStartTime,
 }: CandleChartProps) {
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
@@ -277,6 +314,7 @@ export default function CandleChart({
   const masRef = React.useRef<number[]>(mas);
   const priceScaleRef = React.useRef<PriceScale>(priceScale);
   const indicatorRef = React.useRef<Indicator>(indicator);
+  const bollingerRef = React.useRef<boolean>(bollinger);
   const displayStartRef = React.useRef<number | undefined>(displayStartTime);
 
   // Bridge to the mount-effect closures so the data effect can drive a repaint.
@@ -753,6 +791,65 @@ export default function CandleChart({
         }
       }
 
+      // ── Bollinger Bands (20, 2σ) — inside the same price clip ──
+      if (bollingerRef.current) {
+        const bb = computeBollinger(cs, 20, 2);
+        const col = pal.ma[2] ?? pal.chipBg; // distinct from MA20/MA50 colours
+        // translucent fill between the upper and lower band
+        ctx.save();
+        ctx.globalAlpha = 0.08;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        let filled = false;
+        for (let i = drawFrom; i <= drawTo; i++) {
+          const u = bb.upper[i];
+          if (u == null) continue;
+          const x = xForIndex(i + 0.5);
+          const y = yForPrice(u);
+          if (!filled) {
+            ctx.moveTo(x, y);
+            filled = true;
+          } else ctx.lineTo(x, y);
+        }
+        for (let i = drawTo; i >= drawFrom; i--) {
+          const l = bb.lower[i];
+          if (l == null) continue;
+          ctx.lineTo(xForIndex(i + 0.5), yForPrice(l));
+        }
+        if (filled) {
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+        // the three lines (mid dashed so it reads apart from the MAs)
+        const drawBand = (arr: Array<number | null>, dash: number[]) => {
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 1;
+          ctx.lineJoin = "round";
+          ctx.setLineDash(dash);
+          ctx.beginPath();
+          let started = false;
+          for (let i = drawFrom; i <= drawTo; i++) {
+            const v = arr[i];
+            if (v == null) {
+              started = false;
+              continue;
+            }
+            const x = xForIndex(i + 0.5);
+            const y = yForPrice(v);
+            if (!started) {
+              ctx.moveTo(x, y);
+              started = true;
+            } else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        };
+        drawBand(bb.upper, []);
+        drawBand(bb.lower, []);
+        drawBand(bb.mid, [4, 3]);
+        ctx.setLineDash([]);
+      }
+
       // ── moving-average overlays (inside the same price clip) ──
       const periods = masRef.current;
       if (periods.length > 0) {
@@ -809,9 +906,10 @@ export default function CandleChart({
         }
       }
 
-      // ── always-on moving-average legend (top-left, first row) ──
+      // ── always-on overlay legend (top-left, first row): MAs + Bollinger ──
       const maPeriods = masRef.current;
-      if (maPeriods.length > 0 && cs.length > 0) {
+      const hasOverlayLegend = maPeriods.length > 0 || bollingerRef.current;
+      if (hasOverlayLegend && cs.length > 0) {
         ctx.textAlign = "left";
         let mlx = L.left + 4;
         const mly = L.top + 9;
@@ -830,9 +928,15 @@ export default function CandleChart({
           ctx.fillText(label + valText, mlx, mly);
           mlx += ctx.measureText(label + valText).width + 12;
         }
+        if (bollingerRef.current) {
+          ctx.fillStyle = pal.ma[2] ?? pal.chipBg;
+          const label = "BB 20 2";
+          ctx.fillText(label, mlx, mly);
+          mlx += ctx.measureText(label).width + 12;
+        }
       }
-      // OHLC hover legend drops to a second row when the MA legend owns the first.
-      const ohlcRowY = maPeriods.length > 0 ? L.top + 25 : L.top + 9;
+      // OHLC hover legend drops to a second row when the overlay legend owns the first.
+      const ohlcRowY = hasOverlayLegend ? L.top + 25 : L.top + 9;
 
       // crosshair + hovered-candle OHLC legend
       if (crosshair.on && !drag.on) {
@@ -1081,6 +1185,7 @@ export default function CandleChart({
     masRef.current = mas;
     priceScaleRef.current = priceScale;
     indicatorRef.current = indicator;
+    bollingerRef.current = bollinger;
     displayStartRef.current = displayStartTime;
     // currency is part of the props contract but the renderer formats numbers
     // without a currency symbol; reference it so the dep stays honest.
@@ -1110,7 +1215,7 @@ export default function CandleChart({
     }
     prevLenRef.current = candles.length;
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicator, displayStartTime]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicator, bollinger, displayStartTime]);
 
   return (
     <div ref={wrapRef} className={className}>

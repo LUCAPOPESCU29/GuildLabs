@@ -96,6 +96,7 @@ interface ChartPrefs {
   ma: number[];
   scale: PriceScale;
   ind: Indicator;
+  bb: boolean;
 }
 
 const isChartType = (v: unknown): v is ChartType => v === "candles" || v === "area";
@@ -124,6 +125,7 @@ function readStoredPrefs(): Partial<ChartPrefs> {
     if (typeof p.vol === "boolean") out.vol = p.vol;
     if (isPriceScale(p.scale)) out.scale = p.scale;
     if (isIndicator(p.ind)) out.ind = p.ind;
+    if (typeof p.bb === "boolean") out.bb = p.bb;
     const ma = sanitizeMas(p.ma);
     if (ma) out.ma = ma;
     return out;
@@ -145,6 +147,8 @@ function readUrlPrefs(): Partial<ChartPrefs> {
   if (isPriceScale(scale)) out.scale = scale;
   const ind = q.get("ind");
   if (isIndicator(ind)) out.ind = ind;
+  const bb = q.get("bb");
+  if (bb === "0" || bb === "1") out.bb = bb === "1";
   const ma = q.get("ma");
   if (ma != null) {
     const parsed = sanitizeMas(ma.split(",").map((s) => Number(s.trim())));
@@ -338,6 +342,7 @@ export default function LiveChart({
   const [mas, setMas] = React.useState<number[]>([]); // active SMA periods, ascending
   const [priceScale, setPriceScale] = React.useState<PriceScale>("linear");
   const [indicator, setIndicator] = React.useState<Indicator>("none");
+  const [bollinger, setBollinger] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
   // Gate prefs persistence until the stored/URL prefs have been applied, so the
   // first render's defaults don't clobber what the user previously saved.
@@ -419,6 +424,7 @@ export default function LiveChart({
     if (p.ma != null) setMas(p.ma);
     if (p.scale != null) setPriceScale(p.scale);
     if (p.ind != null) setIndicator(p.ind);
+    if (p.bb != null) setBollinger(p.bb);
     setPrefsReady(true);
   }, []);
 
@@ -432,12 +438,13 @@ export default function LiveChart({
         ma: mas,
         scale: priceScale,
         ind: indicator,
+        bb: bollinger,
       };
       window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     } catch {
       // storage full / disabled — non-fatal
     }
-  }, [prefsReady, chartType, showVolume, mas, priceScale, indicator]);
+  }, [prefsReady, chartType, showVolume, mas, priceScale, indicator, bollinger]);
 
   // Build a shareable deep link encoding the current view, copy to clipboard.
   const onShare = React.useCallback(() => {
@@ -449,6 +456,7 @@ export default function LiveChart({
     if (mas.length) params.set("ma", mas.join(","));
     params.set("scale", priceScale);
     params.set("ind", indicator);
+    if (bollinger) params.set("bb", "1");
     const url = `${window.location.origin}/c/${encodeURIComponent(symbol)}?${params}`;
     const done = () => {
       setCopied(true);
@@ -456,7 +464,7 @@ export default function LiveChart({
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     };
     navigator.clipboard?.writeText(url).then(done).catch(done);
-  }, [range, chartType, showVolume, mas, priceScale, indicator, symbol]);
+  }, [range, chartType, showVolume, mas, priceScale, indicator, bollinger, symbol]);
 
   // ── Price flash on tick ────────────────────────────────────────────────────
   // The CandleChart owns all rendering; here we only watch the price for the
@@ -735,6 +743,25 @@ export default function LiveChart({
                 })}
               </div>
 
+              {/* Bollinger Bands toggle */}
+              <button
+                onClick={() => setBollinger((b) => !b)}
+                className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                style={
+                  bollinger
+                    ? { background: UP, color: "#000", borderColor: "transparent" }
+                    : {
+                        background: "var(--card)",
+                        color: "var(--muted-foreground)",
+                        borderColor: "var(--card-border)",
+                      }
+                }
+                aria-pressed={bollinger}
+                title="Bollinger Bands (20, 2σ)"
+              >
+                BB
+              </button>
+
               {/* Share current view */}
               <button
                 onClick={onShare}
@@ -789,6 +816,7 @@ export default function LiveChart({
                   mas={mas}
                   priceScale={priceScale}
                   indicator={indicator}
+                  bollinger={bollinger}
                   displayStartTime={data.displayStartTime}
                   className="absolute inset-0"
                 />
