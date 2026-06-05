@@ -376,6 +376,9 @@ export default function LiveChart({
   const [indicators, setIndicators] = React.useState<Indicator[]>([]);
   const [bollinger, setBollinger] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
+  const [compareSymbol, setCompareSymbol] = React.useState<string | null>(null);
+  const [compareData, setCompareData] = React.useState<{ symbol: string; candles: Candle[] } | null>(null);
+  const [compareInput, setCompareInput] = React.useState("");
   // Gate prefs persistence until the stored/URL prefs have been applied, so the
   // first render's defaults don't clobber what the user previously saved.
   const [prefsReady, setPrefsReady] = React.useState(false);
@@ -432,6 +435,18 @@ export default function LiveChart({
     [router, searchValue]
   );
 
+  const onCompareSubmit = React.useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const s = compareInput.trim().toUpperCase();
+      if (s && s !== (data?.symbol ?? symbol).toUpperCase()) {
+        setCompareSymbol(s);
+        setCompareInput("");
+      }
+    },
+    [compareInput, data?.symbol, symbol]
+  );
+
   // ── Fetch data on range change + on a refresh interval ─────────────────────
   const load = React.useCallback(
     async (r: RangeKey, soft: boolean) => {
@@ -461,6 +476,36 @@ export default function LiveChart({
     load(range, false);
   }, [range, load]);
 
+  // Fetch the compare ticker (re-fetched on range change so bars align by time).
+  React.useEffect(() => {
+    if (!compareSymbol) {
+      setCompareData(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/chart/${encodeURIComponent(compareSymbol)}?range=${range}`,
+          { cache: "no-store" }
+        );
+        const json = await res.json();
+        if (!res.ok) throw new Error();
+        if (!cancelled) {
+          setCompareData({
+            symbol: (json.symbol ?? compareSymbol).toUpperCase(),
+            candles: Array.isArray(json.candles) ? json.candles : [],
+          });
+        }
+      } catch {
+        if (!cancelled) setCompareData(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [compareSymbol, symbol, range]);
+
   React.useEffect(() => {
     const id = setInterval(() => {
       if (document.visibilityState === "visible") load(range, true);
@@ -487,6 +532,9 @@ export default function LiveChart({
     if (p.scale != null) setPriceScale(p.scale);
     if (p.ind != null) setIndicators(p.ind);
     if (p.bb != null) setBollinger(p.bb);
+    // compare ticker rides the URL only (not localStorage)
+    const cmp = new URLSearchParams(window.location.search).get("cmp");
+    if (cmp) setCompareSymbol(cmp.toUpperCase());
     setPrefsReady(true);
   }, []);
 
@@ -519,6 +567,7 @@ export default function LiveChart({
     params.set("scale", priceScale);
     if (indicators.length) params.set("ind", indicators.join(","));
     if (bollinger) params.set("bb", "1");
+    if (compareSymbol) params.set("cmp", compareSymbol);
     const url = `${window.location.origin}/c/${encodeURIComponent(symbol)}?${params}`;
     const done = () => {
       setCopied(true);
@@ -526,7 +575,7 @@ export default function LiveChart({
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     };
     navigator.clipboard?.writeText(url).then(done).catch(done);
-  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, symbol]);
+  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, compareSymbol, symbol]);
 
   // ── Price flash on tick ────────────────────────────────────────────────────
   // The CandleChart owns all rendering; here we only watch the price for the
@@ -869,6 +918,37 @@ export default function LiveChart({
               >
                 {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
               </button>
+
+              {/* Compare overlay ticker */}
+              <form
+                onSubmit={onCompareSubmit}
+                className="inline-flex items-center gap-1.5 rounded-full border border-card-border bg-card px-3 py-1.5"
+              >
+                <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  vs
+                </span>
+                {compareSymbol ? (
+                  <button
+                    type="button"
+                    onClick={() => setCompareSymbol(null)}
+                    className="inline-flex items-center gap-1 font-mono text-xs font-bold uppercase tracking-wider"
+                    style={{ color: MA_COLORS[1] }}
+                    title="Remove comparison"
+                  >
+                    {compareData?.symbol ?? compareSymbol} ✕
+                  </button>
+                ) : (
+                  <input
+                    value={compareInput}
+                    onChange={(e) => setCompareInput(e.target.value)}
+                    placeholder="Compare…"
+                    aria-label="Compare ticker"
+                    spellCheck={false}
+                    autoCapitalize="characters"
+                    className="w-20 bg-transparent font-mono text-xs uppercase tracking-wider text-foreground placeholder:text-muted-foreground/60 placeholder:normal-case focus:outline-none"
+                  />
+                )}
+              </form>
             </div>
 
             {/* Ticker search */}
@@ -920,6 +1000,8 @@ export default function LiveChart({
                   priceScale={priceScale}
                   indicators={indicators}
                   bollinger={bollinger}
+                  symbol={(data.symbol ?? symbol).toUpperCase()}
+                  compare={compareData}
                   displayStartTime={data.displayStartTime}
                   className="absolute inset-0"
                 />

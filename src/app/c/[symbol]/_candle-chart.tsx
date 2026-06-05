@@ -83,6 +83,8 @@ interface CandleChartProps {
   priceScale?: PriceScale;
   indicators?: Indicator[]; // stacked oscillator sub-panels below the chart
   bollinger?: boolean; // Bollinger Bands (20, 2σ) overlay on the price series
+  symbol?: string; // primary ticker (for drawings key + compare legend)
+  compare?: { symbol: string; candles: Candle[] } | null; // overlay (normalized %)
   onToggleFullscreen?: () => void; // invoked by the "F" shortcut
   // UTC seconds of the first candle to *show*. The `candles` array may extend
   // earlier (warmup bars so RSI/MACD/MA are fully defined across the visible
@@ -393,6 +395,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     priceScale = "linear",
     indicators = [],
     bollinger = false,
+    symbol,
+    compare,
     onToggleFullscreen,
     displayStartTime,
   },
@@ -413,6 +417,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const priceScaleRef = React.useRef<PriceScale>(priceScale);
   const indicatorsRef = React.useRef<Indicator[]>(indicators);
   const bollingerRef = React.useRef<boolean>(bollinger);
+  const symbolRef = React.useRef<string | undefined>(symbol);
+  const compareRef = React.useRef<{ symbol: string; candles: Candle[] } | null | undefined>(compare);
   const onFsRef = React.useRef(onToggleFullscreen);
   const displayStartRef = React.useRef<number | undefined>(displayStartTime);
 
@@ -1165,6 +1171,65 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           ctx.stroke();
         }
       }
+
+      // ── compare overlay: a 2nd ticker normalized to % from the first visible
+      //    point, aligned by time, sharing the primary's baseline ──
+      const cmp = compareRef.current;
+      if (cmp && cmp.candles.length > 1 && cs.length > 0) {
+        const ccs = cmp.candles;
+        const idxForTime = (t: number) => {
+          if (t <= ccs[0].time) return 0;
+          if (t >= ccs[ccs.length - 1].time) return ccs.length - 1;
+          let lo = 0;
+          let hi = ccs.length - 1;
+          while (lo <= hi) {
+            const m = (lo + hi) >> 1;
+            if (ccs[m].time < t) lo = m + 1;
+            else hi = m - 1;
+          }
+          return Math.max(0, Math.min(ccs.length - 1, lo));
+        };
+        // map a unix time onto the primary's index/x space (interpolated)
+        const timeToX = (t: number) => {
+          if (t <= cs[0].time) return xForIndex(0.5);
+          if (t >= cs[cs.length - 1].time) return xForIndex(cs.length - 1 + 0.5);
+          let lo = 0;
+          let hi = cs.length - 1;
+          while (lo <= hi) {
+            const m = (lo + hi) >> 1;
+            if (cs[m].time < t) lo = m + 1;
+            else hi = m - 1;
+          }
+          const i1 = Math.max(0, hi);
+          const i2 = Math.min(cs.length - 1, lo);
+          const t1 = cs[i1].time;
+          const t2 = cs[i2].time;
+          const frac = t2 > t1 ? (t - t1) / (t2 - t1) : 0;
+          return xForIndex(i1 + frac + 0.5);
+        };
+        const baseTime = cs[baseIdx]?.time ?? cs[0].time;
+        const cmpBase = ccs[idxForTime(baseTime)].close || ccs[0].close;
+        const tFrom = cs[Math.max(0, Math.floor(v.from))]?.time ?? cs[0].time;
+        const tTo = cs[Math.min(cs.length - 1, Math.ceil(v.to))]?.time ?? cs[cs.length - 1].time;
+        ctx.strokeStyle = pal.ma[1];
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = "round";
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        let cstarted = false;
+        for (let i = 0; i < ccs.length; i++) {
+          const t = ccs[i].time;
+          if (t < tFrom || t > tTo) continue;
+          const pct = cmpBase ? ccs[i].close / cmpBase - 1 : 0;
+          const x = timeToX(t);
+          const y = yForPrice(pctBase * (1 + pct));
+          if (!cstarted) {
+            ctx.moveTo(x, y);
+            cstarted = true;
+          } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
       ctx.restore();
 
       // last-price dashed line + breathing dot + axis chip (subtle "live" cue)
@@ -1210,9 +1275,10 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         }
       }
 
-      // ── always-on overlay legend (top-left, first row): MAs + Bollinger ──
+      // ── always-on overlay legend (top-left, first row): MAs + Bollinger + compare ──
       const maPeriods = masRef.current;
-      const hasOverlayLegend = maPeriods.length > 0 || bollingerRef.current;
+      const hasOverlayLegend =
+        maPeriods.length > 0 || bollingerRef.current || !!compareRef.current;
       if (hasOverlayLegend && cs.length > 0) {
         ctx.textAlign = "left";
         let mlx = L.left + 4;
@@ -1248,6 +1314,38 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           const label = `BB 20 2${extra}`;
           ctx.fillText(label, mlx, mly);
           mlx += ctx.measureText(label).width + 12;
+        }
+        const cmpL = compareRef.current;
+        if (cmpL && cmpL.candles.length > 1) {
+          const ccs = cmpL.candles;
+          const vto = Math.min(cs.length - 1, Math.ceil(v.to));
+          const primPct = pctBase ? (cs[vto].close / pctBase - 1) * 100 : 0;
+          const baseTime = cs[baseIdx]?.time ?? cs[0].time;
+          const lastTime = cs[vto]?.time ?? cs[cs.length - 1].time;
+          let cb = ccs[0].close;
+          for (let i = 0; i < ccs.length; i++)
+            if (ccs[i].time >= baseTime) {
+              cb = ccs[i].close;
+              break;
+            }
+          let cv = ccs[ccs.length - 1].close;
+          for (let i = ccs.length - 1; i >= 0; i--)
+            if (ccs[i].time <= lastTime) {
+              cv = ccs[i].close;
+              break;
+            }
+          const cmpPct = cb ? (cv / cb - 1) * 100 : 0;
+          const sgn = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+          if (symbolRef.current) {
+            const t1 = `${symbolRef.current} ${sgn(primPct)}`;
+            ctx.fillStyle = primPct >= 0 ? pal.up : pal.down;
+            ctx.fillText(t1, mlx, mly);
+            mlx += ctx.measureText(t1).width + 12;
+          }
+          const t2 = `${cmpL.symbol} ${sgn(cmpPct)}`;
+          ctx.fillStyle = pal.ma[1];
+          ctx.fillText(t2, mlx, mly);
+          mlx += ctx.measureText(t2).width + 12;
         }
       }
       // OHLC hover legend drops to a second row when the overlay legend owns the first.
@@ -1708,6 +1806,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     priceScaleRef.current = priceScale;
     indicatorsRef.current = indicators;
     bollingerRef.current = bollinger;
+    symbolRef.current = symbol;
+    compareRef.current = compare;
     onFsRef.current = onToggleFullscreen;
     displayStartRef.current = displayStartTime;
     // currency is part of the props contract but the renderer formats numbers
@@ -1738,7 +1838,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     }
     prevLenRef.current = candles.length;
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicators, bollinger, onToggleFullscreen, displayStartTime]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicators, bollinger, symbol, compare, onToggleFullscreen, displayStartTime]);
 
   return (
     <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>
