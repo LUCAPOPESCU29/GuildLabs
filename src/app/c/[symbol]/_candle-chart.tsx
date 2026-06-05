@@ -534,6 +534,41 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     const intraday = () =>
       intervalRef.current.endsWith("m") || intervalRef.current.endsWith("h");
 
+    // Regular-session detection (NYSE 9:30–16:00 ET) for intraday shading. The
+    // ET formatter is cached, and the per-bar flags are memoised per candle array
+    // so we don't re-run Intl every frame.
+    let etFmt: Intl.DateTimeFormat | null = null;
+    try {
+      etFmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    } catch {
+      etFmt = null;
+    }
+    const etMinutes = (sec: number): number | null => {
+      if (!etFmt) return null;
+      let h = 0;
+      let m = 0;
+      for (const part of etFmt.formatToParts(new Date(sec * 1000))) {
+        if (part.type === "hour") h = parseInt(part.value, 10) % 24;
+        else if (part.type === "minute") m = parseInt(part.value, 10);
+      }
+      return h * 60 + m;
+    };
+    let sessionCache: { ref: Candle[]; flags: boolean[] } | null = null;
+    const sessionFlags = (cs: Candle[]): boolean[] => {
+      if (sessionCache && sessionCache.ref === cs) return sessionCache.flags;
+      const flags = cs.map((c) => {
+        const mins = etMinutes(c.time);
+        return mins == null ? true : mins >= 570 && mins < 960; // 9:30–16:00 ET
+      });
+      sessionCache = { ref: cs, flags };
+      return flags;
+    };
+
     const layout = () => {
       const top = PAD;
       const bottom = size.h - TIME_H;
@@ -824,6 +859,19 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       // Auto-thin hysteresis: enter line-mode under 2.2px/bar, exit above 3.2px.
       if (!thinMode && bw < 2.2) thinMode = true;
       else if (thinMode && bw > 3.2) thinMode = false;
+
+      // ── intraday session shading (pre-market / after-hours columns) ──
+      if (intra && cs.length > 0) {
+        const flags = sessionFlags(cs);
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = pal.gridSoft;
+        for (let i = first; i <= last; i++) {
+          if (flags[i]) continue; // regular session — leave clear
+          ctx.fillRect(xForIndex(i), L.top, Math.max(1, bw), L.bottom - L.top);
+        }
+        ctx.restore();
+      }
 
       // ── hovered-candle column tint (behind everything) ──
       if (crosshair.on && !drag.on && !measure.on) {
@@ -1451,6 +1499,38 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           ctx.fillStyle = pal.onColorText;
           ctx.textAlign = "left";
           ctx.fillText(label, L.right + 7, ly);
+        }
+      }
+
+      // ── visible-range high / low annotations ──
+      if (cs.length > 0) {
+        let hiV = -Infinity;
+        let loV = Infinity;
+        let hiI = -1;
+        let loI = -1;
+        const a = Math.max(0, Math.floor(v.from));
+        const b = Math.min(cs.length - 1, Math.ceil(v.to));
+        for (let i = a; i <= b; i++) {
+          if (cs[i].high > hiV) {
+            hiV = cs[i].high;
+            hiI = i;
+          }
+          if (cs[i].low < loV) {
+            loV = cs[i].low;
+            loI = i;
+          }
+        }
+        ctx.fillStyle = pal.legendLabel;
+        ctx.textAlign = "center";
+        if (hiI >= 0) {
+          const x = Math.max(L.left + 24, Math.min(xForIndex(hiI + 0.5), L.right - 24));
+          const y = Math.max(L.priceTop + 8, yForPrice(hiV) - 8);
+          ctx.fillText(`▲ ${fmtAxis(hiV)}`, x, y);
+        }
+        if (loI >= 0) {
+          const x = Math.max(L.left + 24, Math.min(xForIndex(loI + 0.5), L.right - 24));
+          const y = Math.min(L.priceBottom - 8, yForPrice(loV) + 8);
+          ctx.fillText(`▼ ${fmtAxis(loV)}`, x, y);
         }
       }
 
