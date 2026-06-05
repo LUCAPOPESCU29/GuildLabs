@@ -341,13 +341,16 @@ async function getChartDataFromNasdaq(symbol: string, range: Range): Promise<Cha
   // We still attempt it but propagate failures cleanly.
   const today = new Date();
   const cfg = RANGES[range];
-  const fromBase = range === "ytd"
-    ? new Date(Date.UTC(today.getUTCFullYear(), 0, 1))
-    : new Date(Date.now() - (cfg.interval === "5m" ? 7 : Math.max(31, 0)) * 86_400_000);
-  // For non-ytd ranges, derive lookback days from the range key so we cover the
-  // requested window precisely.
-  const daysByRange: Record<Range, number> = { "1d": 5, "5d": 14, "1mo": 31, "6mo": 186, "1y": 366, ytd: 0 };
-  const from = range === "ytd" ? fromBase : new Date(Date.now() - daysByRange[range] * 86_400_000);
+  // Fetch a longer history than we display so RSI/MACD/MA50 are fully defined
+  // across the visible window (MACD needs ~35 prior bars, MA50 needs 50). The
+  // extra bars become warmup, kept off-screen via displayStartTime. ytd anchors
+  // its window to Jan 1 but still pulls ~200 days before it for warmup.
+  const warmupDaysByRange: Record<Range, number> = {
+    "1d": 7, "5d": 21, "1mo": 200, "6mo": 400, "1y": 480, ytd: 200,
+  };
+  const from = range === "ytd"
+    ? new Date(Date.UTC(today.getUTCFullYear(), 0, 1) - warmupDaysByRange.ytd * 86_400_000)
+    : new Date(Date.now() - warmupDaysByRange[range] * 86_400_000);
 
   const sym = encodeURIComponent(symbol.toUpperCase());
 
@@ -413,6 +416,7 @@ async function getChartDataFromNasdaq(symbol: string, range: Range): Promise<Cha
     interval: cfg.interval,
     rangeLabel: cfg.label,
     candles,
+    displayStartTime: displayStartSeconds(range),
   };
 }
 
