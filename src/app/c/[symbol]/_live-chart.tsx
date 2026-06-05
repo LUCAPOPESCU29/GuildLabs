@@ -69,6 +69,12 @@ type RangeKey = (typeof RANGES)[number]["key"];
 // for stocks (whose intraday would otherwise just error out).
 const INTRADAY_RANGES = new Set<RangeKey>(["1d", "5d"]);
 
+// Stocks have working intraday only when a keyed provider is configured server-
+// side (Twelve Data). This build-time flag is flipped on once TWELVEDATA_API_KEY
+// is live on Vercel, un-hiding the 1D/5D tabs for stocks. Crypto always has
+// intraday (CoinGecko/Yahoo) regardless of this flag.
+const STOCK_INTRADAY_ENABLED = process.env.NEXT_PUBLIC_STOCK_INTRADAY === "1";
+
 // Crypto detection mirrored from the bot's CoinGecko provider (coingecko.js):
 // a known base paired with a supported quote currency. Kept in sync by hand —
 // it's a small, slow-moving list.
@@ -325,9 +331,15 @@ export default function LiveChart({
   // Stocks have no working intraday (Yahoo 429s datacenter IPs), so only crypto
   // gets the 1D/5D tabs; everything else starts on (and is limited to) daily+.
   const crypto = isCryptoSymbol(symbol);
-  const visibleRanges = crypto ? RANGES : RANGES.filter((r) => !INTRADAY_RANGES.has(r.key));
+  // Intraday (1D/5D) is available for crypto always, and for stocks once the
+  // keyed provider is enabled. Otherwise hide those tabs and coerce a stock
+  // ?range=1d down to the monthly default.
+  const intradayOk = crypto || STOCK_INTRADAY_ENABLED;
+  const visibleRanges = intradayOk
+    ? RANGES
+    : RANGES.filter((r) => !INTRADAY_RANGES.has(r.key));
   const [range, setRange] = React.useState<RangeKey>(() =>
-    !crypto && INTRADAY_RANGES.has(initialRange) ? "1mo" : initialRange
+    !intradayOk && INTRADAY_RANGES.has(initialRange) ? "1mo" : initialRange
   );
   const [data, setData] = React.useState<ChartData | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -903,7 +915,8 @@ export default function LiveChart({
           {/* ── Footer / disclaimer + CTA ─────────────────────────────────── */}
           <div className="mt-8 flex flex-col items-center gap-4 border-t border-card-border pt-6 text-center">
             <p className="max-w-xl font-mono text-[11px] leading-relaxed text-muted-foreground">
-              Data via Yahoo Finance · may be delayed · informational only,{" "}
+              Data via {STOCK_INTRADAY_ENABLED ? "Yahoo Finance & Twelve Data" : "Yahoo Finance"} ·
+              may be delayed · informational only,{" "}
               <span className="font-semibold">not financial advice</span>. ChartIt
               displays public market data and never places trades.
             </p>

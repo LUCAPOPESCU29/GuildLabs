@@ -420,6 +420,131 @@ async function getChartDataFromNasdaq(symbol: string, range: Range): Promise<Cha
   };
 }
 
+// ── Twelve Data intraday provider (keyed) ────────────────────────────────────
+// Yahoo 429s Vercel's datacenter IPs for intraday (and now even daily), so stocks
+// have no working intraday source from the cloud. Twelve Data's free tier (800
+// req/day, 8 req/min) serves real intraday OHLC with an API key. Activated only
+// when TWELVEDATA_API_KEY is set; otherwise this no-ops and the existing
+// fallbacks run unchanged. One request per load (time_series) keeps us under the
+// rate limit on the 10s poll; the quote header is derived from the bars.
+const TWELVE_KEY = process.env.TWELVEDATA_API_KEY ?? "";
+const TWELVE_INTRADAY: Partial<Record<Range, { interval: string; outputsize: number }>> = {
+  "1d": { interval: "5min", outputsize: 110 },
+  "5d": { interval: "15min", outputsize: 140 },
+};
+
+interface TwelveValue {
+  datetime?: string;
+  open?: string;
+  high?: string;
+  low?: string;
+  close?: string;
+  volume?: string;
+}
+
+const utcDay = (sec: number) => Math.floor(sec / 86_400);
+
+async function getChartDataFromTwelveData(symbol: string, range: Range): Promise<ChartData> {
+  if (!TWELVE_KEY) throw new Error("twelvedata: no api key");
+  const map = TWELVE_INTRADAY[range];
+  if (!map) throw new Error(`twelvedata: ${range} is not an intraday range`);
+
+  const qs = new URLSearchParams({
+    symbol: symbol.toUpperCase(),
+    interval: map.interval,
+    outputsize: String(map.outputsize),
+    timezone: "UTC",
+    apikey: TWELVE_KEY,
+  });
+  const res = await fetch(`https://api.twelvedata.com/time_series?${qs}`, {
+    headers: { Accept: "application/json", "User-Agent": UA },
+    cache: "no-store",
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`twelvedata HTTP ${res.status}`);
+  const j = (await res.json()) as {
+    status?: string;
+    message?: string;
+    meta?: Record<string, unknown>;
+    values?: TwelveValue[];
+  };
+  if (j?.status !== "ok" || !Array.isArray(j.values)) {
+    throw new Error(j?.message || `twelvedata: no data for "${symbol}"`);
+  }
+
+  const candles: Candle[] = [];
+  const seen = new Set<number>();
+  for (const v of j.values) {
+    // datetime is "YYYY-MM-DD HH:mm:ss" in UTC (we requested timezone=UTC).
+    const ms = Date.parse((v.datetime ?? "").replace(" ", "T") + "Z");
+    const close = num(v.close != null ? parseFloat(v.close) : null);
+    if (!Number.isFinite(ms) || close == null) continue;
+    const time = Math.floor(ms / 1000);
+    if (seen.has(time)) continue;
+    seen.add(time);
+    candles.push({
+      time,
+      open: num(v.open != null ? parseFloat(v.open) : null) ?? close,
+      high: num(v.high != null ? parseFloat(v.high) : null) ?? close,
+      low: num(v.low != null ? parseFloat(v.low) : null) ?? close,
+      close,
+      volume: num(v.volume != null ? parseFloat(v.volume) : null),
+    });
+  }
+  candles.sort((a, b) => a.time - b.time);
+  if (candles.length === 0) throw new Error(`twelvedata: no history for "${symbol}"`);
+
+  const meta = j.meta ?? {};
+  const last = candles[candles.length - 1];
+  const lastDay = utcDay(last.time);
+
+  // Prior-session close → true daily change when the window spans >1 day; for a
+  // single-session (1d) window fall back to the session's opening price.
+  let prevClose = candles[0].open;
+  for (let i = candles.length - 2; i >= 0; i--) {
+    if (utcDay(candles[i].time) !== lastDay) {
+      prevClose = candles[i].close;
+      break;
+    }
+  }
+
+  // Day range + volume from the most-recent session's bars.
+  let dayHigh = -Infinity;
+  let dayLow = Infinity;
+  let dayVol = 0;
+  for (const c of candles) {
+    if (utcDay(c.time) !== lastDay) continue;
+    if (c.high > dayHigh) dayHigh = c.high;
+    if (c.low < dayLow) dayLow = c.low;
+    if (typeof c.volume === "number") dayVol += c.volume;
+  }
+
+  const price = last.close;
+  const change = price - prevClose;
+  const changePercent = prevClose ? (change / prevClose) * 100 : null;
+  const cfg = RANGES[range];
+
+  return {
+    symbol: String(meta.symbol ?? symbol).toUpperCase(),
+    name: String(meta.symbol ?? symbol).toUpperCase(),
+    currency: String(meta.currency ?? "USD"),
+    exchange: (meta.exchange as string) ?? null,
+    marketState: null,
+    price,
+    prevClose,
+    change,
+    changePercent,
+    dayHigh: Number.isFinite(dayHigh) ? dayHigh : null,
+    dayLow: Number.isFinite(dayLow) ? dayLow : null,
+    volume: dayVol > 0 ? dayVol : null,
+    range,
+    interval: cfg.interval,
+    rangeLabel: cfg.label,
+    candles,
+    // intraday: no warmup window, show the whole array
+  };
+}
+
 // ── ChartIt bot proxy ────────────────────────────────────────────────────────
 // Yahoo hard-blocks Vercel's shared datacenter IPs (even with a primed session),
 // so intraday ranges silently die here. The ChartIt bot runs on a different host
@@ -454,28 +579,38 @@ async function getChartDataFromBot(symbol: string, range: Range): Promise<ChartD
 
 /** Fetch OHLC + a live quote for `symbol` over `range`. Throws on no data. */
 export async function getChartData(symbol: string, range: Range): Promise<ChartData> {
-  // Try Yahoo first (richer data, supports intraday + crypto + indices). If
-  // Yahoo throttles every reachable host (the norm from Vercel IPs), relay the
-  // request through the ChartIt bot, whose host Yahoo still serves — this is the
-  // only path that delivers genuine intraday candles. Nasdaq is the final
-  // fallback, but it's daily-only so it can't cover intraday ranges. Original
-  // Yahoo error is surfaced if every fallback also comes up empty.
+  // Try Yahoo first (richest data, covers intraday + crypto + indices when it
+  // isn't throttling our IP). On failure the fallback chain depends on the range:
+  //   intraday → Twelve Data (keyed) → ChartIt bot relay  (Nasdaq has no intraday)
+  //   daily    → ChartIt bot relay → Nasdaq
+  // The original Yahoo error is surfaced if every fallback also comes up empty.
+  const intraday =
+    RANGES[range].interval.endsWith("m") || RANGES[range].interval.endsWith("h");
   try {
     return await getChartDataFromYahoo(symbol, range);
   } catch (yErr) {
-    // The bot reaches Yahoo intraday, so try it for every range before Nasdaq.
+    if (intraday) {
+      // Twelve Data serves real stock intraday with a key; the bot reaches
+      // Yahoo/CoinGecko intraday (covers crypto). Nasdaq is daily-only — skip it
+      // so we don't render daily bars as if they were 5-minute candles.
+      try {
+        return await getChartDataFromTwelveData(symbol, range);
+      } catch {
+        // no key / unsupported symbol — try the relay
+      }
+      try {
+        return await getChartDataFromBot(symbol, range);
+      } catch {
+        // relay unconfigured / unreachable
+      }
+      throw yErr;
+    }
+    // daily / weekly: bot relay first, then Nasdaq's keyless daily history.
     try {
       return await getChartDataFromBot(symbol, range);
     } catch {
-      // bot unconfigured or unreachable — continue to Nasdaq for daily ranges
+      // relay unconfigured / unreachable — continue to Nasdaq
     }
-    // Nasdaq is daily-only. For the intraday ranges (1d → 5m, 5d → 15m) it would
-    // return a handful of daily bars that the chart then renders as if they were
-    // 5-minute candles — the "1D has fewer candles than 1M" bug. Only fall back
-    // for ranges that are natively daily/weekly.
-    const intraday =
-      RANGES[range].interval.endsWith("m") || RANGES[range].interval.endsWith("h");
-    if (intraday) throw yErr;
     try {
       return await getChartDataFromNasdaq(symbol, range);
     } catch {
