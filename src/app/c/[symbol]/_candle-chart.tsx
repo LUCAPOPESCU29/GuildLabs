@@ -556,6 +556,24 @@ export default function CandleChart({
         if (ind === "rsi") {
           const rsi = computeRSI(cs, 14);
           const yForRsi = (val: number) => L.indTop + ((100 - val) / 100) * L.indH;
+          // Premium / discount zones: shade overbought (≥70) and oversold (≤30).
+          // Premium = the asset is "expensive" (down-tinted, lean-to-sell);
+          // discount = "cheap" (up-tinted, lean-to-buy).
+          const y70 = yForRsi(70);
+          const y30 = yForRsi(30);
+          ctx.save();
+          ctx.globalAlpha = 0.1;
+          ctx.fillStyle = pal.down;
+          ctx.fillRect(L.left, L.indTop, L.plotW, y70 - L.indTop);
+          ctx.fillStyle = pal.up;
+          ctx.fillRect(L.left, y30, L.plotW, L.indBottom - y30);
+          ctx.restore();
+          // zone labels, faint and inside the panel on the right
+          ctx.fillStyle = pal.legendLabel;
+          ctx.textAlign = "right";
+          if (y70 - L.indTop > 11) ctx.fillText("PREMIUM", L.right - 4, L.indTop + 7);
+          if (L.indBottom - y30 > 11) ctx.fillText("DISCOUNT", L.right - 4, L.indBottom - 6);
+          ctx.textAlign = "left";
           ctx.strokeStyle = pal.gridSoft;
           ctx.lineWidth = 1;
           ctx.setLineDash([3, 3]);
