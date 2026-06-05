@@ -13,6 +13,8 @@ import {
   Share2,
   Check,
   Camera,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
@@ -383,11 +385,25 @@ export default function LiveChart({
   const prevPriceRef = React.useRef<number | null>(null);
   const flashTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const chartRef = React.useRef<CandleChartHandle>(null);
+  const cardRef = React.useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = React.useState(false);
 
   const onScreenshot = React.useCallback(() => {
     const name = `${(data?.symbol ?? symbol).toUpperCase()}-${range}.png`;
     chartRef.current?.exportPng(name);
   }, [data?.symbol, symbol, range]);
+
+  const toggleFullscreen = React.useCallback(() => {
+    if (typeof document === "undefined") return;
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    else cardRef.current?.requestFullscreen?.().catch(() => {});
+  }, []);
+
+  React.useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
 
   const toggleMa = React.useCallback((period: number) => {
     setMas((prev) =>
@@ -842,6 +858,17 @@ export default function LiveChart({
                 <Camera className="size-3.5" />
                 PNG
               </button>
+
+              {/* Fullscreen toggle (or press F) */}
+              <button
+                onClick={toggleFullscreen}
+                className="inline-flex items-center gap-1.5 rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                style={{ background: "var(--card)", color: "var(--muted-foreground)" }}
+                aria-label="Toggle fullscreen (F)"
+                title="Toggle fullscreen (F)"
+              >
+                {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+              </button>
             </div>
 
             {/* Ticker search */}
@@ -864,15 +891,25 @@ export default function LiveChart({
 
           {/* ── Chart card ────────────────────────────────────────────────── */}
           <div
-            className="relative mt-4 overflow-hidden rounded-3xl border border-card-border bg-card p-3 sm:p-4"
+            ref={cardRef}
+            className={`relative mt-4 overflow-hidden border border-card-border bg-card p-3 sm:p-4 ${
+              isFullscreen ? "flex flex-col rounded-none" : "rounded-3xl"
+            }`}
             style={{
               boxShadow: `var(--card-shadow), 0 40px 90px -50px ${up ? UP_GLOW : DOWN_GLOW}`,
             }}
           >
-            <div className="relative h-[320px] w-full sm:h-[420px]">
+            <div
+              className={
+                isFullscreen
+                  ? "relative min-h-0 w-full flex-1"
+                  : "relative h-[320px] w-full sm:h-[420px]"
+              }
+            >
               {data && (
                 <CandleChart
                   ref={chartRef}
+                  onToggleFullscreen={toggleFullscreen}
                   candles={data.candles}
                   interval={data.interval}
                   currency={data.currency}

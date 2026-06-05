@@ -83,6 +83,7 @@ interface CandleChartProps {
   priceScale?: PriceScale;
   indicators?: Indicator[]; // stacked oscillator sub-panels below the chart
   bollinger?: boolean; // Bollinger Bands (20, 2σ) overlay on the price series
+  onToggleFullscreen?: () => void; // invoked by the "F" shortcut
   // UTC seconds of the first candle to *show*. The `candles` array may extend
   // earlier (warmup bars so RSI/MACD/MA are fully defined across the visible
   // window); the initial view starts here and the warmup stays off-screen but
@@ -392,6 +393,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     priceScale = "linear",
     indicators = [],
     bollinger = false,
+    onToggleFullscreen,
     displayStartTime,
   },
   ref
@@ -411,6 +413,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const priceScaleRef = React.useRef<PriceScale>(priceScale);
   const indicatorsRef = React.useRef<Indicator[]>(indicators);
   const bollingerRef = React.useRef<boolean>(bollinger);
+  const onFsRef = React.useRef(onToggleFullscreen);
   const displayStartRef = React.useRef<number | undefined>(displayStartTime);
 
   // Bridge to the mount-effect closures so the data effect can drive a repaint.
@@ -495,6 +498,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     // Low-rate repaint so the last-price marker can gently breathe.
     let pulseRaf: number | null = null;
     let lastPulseTs = 0;
+    // Whether the pointer is over the chart — gates keyboard shortcuts.
+    let hovered = false;
 
     const intraday = () =>
       intervalRef.current.endsWith("m") || intervalRef.current.endsWith("h");
@@ -1598,6 +1603,74 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       reset();
     };
 
+    // Zoom about the viewport centre (keyboard +/−).
+    const zoomCenter = (factor: number) => {
+      const base = viewTarget ?? viewRef.current;
+      const sp = base.to - base.from;
+      const center = (base.from + base.to) / 2;
+      const maxSpan = Math.max(20, candlesRef.current.length * 4);
+      const newSpan = Math.min(Math.max(sp * factor, 3), maxSpan);
+      const from = center - newSpan / 2;
+      animateTo({ from, to: from + newSpan });
+    };
+
+    const onMouseEnter = () => {
+      hovered = true;
+    };
+    const onMouseLeave = () => {
+      hovered = false;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!hovered) return;
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return;
+      const v = viewRef.current;
+      const step = (v.to - v.from) * 0.12;
+      switch (e.key) {
+        case "ArrowLeft":
+          viewTarget = null;
+          v.from -= step;
+          v.to -= step;
+          schedule();
+          e.preventDefault();
+          break;
+        case "ArrowRight":
+          viewTarget = null;
+          v.from += step;
+          v.to += step;
+          schedule();
+          e.preventDefault();
+          break;
+        case "+":
+        case "=":
+          zoomCenter(1 / 1.2);
+          e.preventDefault();
+          break;
+        case "-":
+        case "_":
+          zoomCenter(1.2);
+          e.preventDefault();
+          break;
+        case "r":
+        case "R":
+          reset();
+          e.preventDefault();
+          break;
+        case "f":
+        case "F":
+          onFsRef.current?.();
+          e.preventDefault();
+          break;
+        case "Escape":
+          if (typeof document !== "undefined" && document.fullscreenElement) document.exitFullscreen?.();
+          break;
+      }
+    };
+
+    canvas.addEventListener("mouseenter", onMouseEnter);
+    canvas.addEventListener("mouseleave", onMouseLeave);
+    window.addEventListener("keydown", onKeyDown);
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", endPointer);
@@ -1617,6 +1690,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("dblclick", onDblClick);
+      canvas.removeEventListener("mouseenter", onMouseEnter);
+      canvas.removeEventListener("mouseleave", onMouseLeave);
+      window.removeEventListener("keydown", onKeyDown);
       if (raf != null) cancelAnimationFrame(raf);
       if (pulseRaf != null) cancelAnimationFrame(pulseRaf);
     };
@@ -1632,6 +1708,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     priceScaleRef.current = priceScale;
     indicatorsRef.current = indicators;
     bollingerRef.current = bollinger;
+    onFsRef.current = onToggleFullscreen;
     displayStartRef.current = displayStartTime;
     // currency is part of the props contract but the renderer formats numbers
     // without a currency symbol; reference it so the dep stays honest.
@@ -1661,10 +1738,10 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     }
     prevLenRef.current = candles.length;
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicators, bollinger, displayStartTime]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicators, bollinger, onToggleFullscreen, displayStartTime]);
 
   return (
-    <div ref={wrapRef} className={className}>
+    <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>
       <canvas ref={canvasRef} style={{ display: "block", touchAction: "none" }} />
       <button
         type="button"
