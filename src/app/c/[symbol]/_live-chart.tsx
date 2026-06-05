@@ -34,12 +34,15 @@ const SCALE_OPTIONS: ReadonlyArray<{ key: PriceScale; label: string }> = [
   { key: "percent", label: "%" },
 ];
 
-// Oscillator sub-panel options.
+// Oscillator panes (toggleable; up to MAX_PANES stack below the chart).
 const INDICATOR_OPTIONS: ReadonlyArray<{ key: Indicator; label: string }> = [
-  { key: "none", label: "None" },
   { key: "rsi", label: "RSI" },
   { key: "macd", label: "MACD" },
+  { key: "stoch", label: "Stoch" },
+  { key: "atr", label: "ATR" },
+  { key: "obv", label: "OBV" },
 ];
+const MAX_PANES = 3;
 
 // Purple + green chart theme, drawn from the FORGE design tokens so the page
 // shares the site's palette and tracks light/dark automatically: green
@@ -103,7 +106,7 @@ interface ChartPrefs {
   vol: boolean;
   ma: number[];
   scale: PriceScale;
-  ind: Indicator;
+  ind: Indicator[];
   bb: boolean;
 }
 
@@ -112,7 +115,15 @@ const isChartType = (v: unknown): v is ChartType =>
 const isPriceScale = (v: unknown): v is PriceScale =>
   v === "linear" || v === "log" || v === "percent";
 const isIndicator = (v: unknown): v is Indicator =>
-  v === "none" || v === "rsi" || v === "macd";
+  v === "rsi" || v === "macd" || v === "stoch" || v === "atr" || v === "obv";
+
+// Accept a list (current) or a single legacy string ("rsi"/"none") and return a
+// validated, de-duped, capped indicator array.
+function sanitizeIndicators(v: unknown): Indicator[] | undefined {
+  if (typeof v === "string") return isIndicator(v) ? [v] : v === "none" ? [] : undefined;
+  if (!Array.isArray(v)) return undefined;
+  return [...new Set(v.filter(isIndicator))].slice(0, MAX_PANES);
+}
 const sanitizeMas = (arr: unknown): number[] | undefined => {
   if (!Array.isArray(arr)) return undefined;
   const allowed = MA_OPTIONS as readonly number[];
@@ -133,7 +144,8 @@ function readStoredPrefs(): Partial<ChartPrefs> {
     if (isChartType(p.type)) out.type = p.type;
     if (typeof p.vol === "boolean") out.vol = p.vol;
     if (isPriceScale(p.scale)) out.scale = p.scale;
-    if (isIndicator(p.ind)) out.ind = p.ind;
+    const ind = sanitizeIndicators(p.ind);
+    if (ind) out.ind = ind;
     if (typeof p.bb === "boolean") out.bb = p.bb;
     const ma = sanitizeMas(p.ma);
     if (ma) out.ma = ma;
@@ -154,8 +166,11 @@ function readUrlPrefs(): Partial<ChartPrefs> {
   if (vol === "0" || vol === "1") out.vol = vol === "1";
   const scale = q.get("scale");
   if (isPriceScale(scale)) out.scale = scale;
-  const ind = q.get("ind");
-  if (isIndicator(ind)) out.ind = ind;
+  const indRaw = q.get("ind");
+  if (indRaw != null) {
+    const ind = sanitizeIndicators(indRaw.split(",").map((s) => s.trim()));
+    if (ind) out.ind = ind;
+  }
   const bb = q.get("bb");
   if (bb === "0" || bb === "1") out.bb = bb === "1";
   const ma = q.get("ma");
@@ -356,7 +371,7 @@ export default function LiveChart({
   const [showVolume, setShowVolume] = React.useState(true);
   const [mas, setMas] = React.useState<number[]>([]); // active SMA periods, ascending
   const [priceScale, setPriceScale] = React.useState<PriceScale>("linear");
-  const [indicator, setIndicator] = React.useState<Indicator>("none");
+  const [indicators, setIndicators] = React.useState<Indicator[]>([]);
   const [bollinger, setBollinger] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
   // Gate prefs persistence until the stored/URL prefs have been applied, so the
@@ -379,6 +394,16 @@ export default function LiveChart({
       prev.includes(period)
         ? prev.filter((p) => p !== period)
         : [...prev, period].sort((a, b) => a - b)
+    );
+  }, []);
+
+  const toggleIndicator = React.useCallback((k: Indicator) => {
+    setIndicators((prev) =>
+      prev.includes(k)
+        ? prev.filter((x) => x !== k)
+        : prev.length >= MAX_PANES
+        ? prev
+        : [...prev, k]
     );
   }, []);
 
@@ -444,7 +469,7 @@ export default function LiveChart({
     if (p.vol != null) setShowVolume(p.vol);
     if (p.ma != null) setMas(p.ma);
     if (p.scale != null) setPriceScale(p.scale);
-    if (p.ind != null) setIndicator(p.ind);
+    if (p.ind != null) setIndicators(p.ind);
     if (p.bb != null) setBollinger(p.bb);
     setPrefsReady(true);
   }, []);
@@ -458,14 +483,14 @@ export default function LiveChart({
         vol: showVolume,
         ma: mas,
         scale: priceScale,
-        ind: indicator,
+        ind: indicators,
         bb: bollinger,
       };
       window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     } catch {
       // storage full / disabled — non-fatal
     }
-  }, [prefsReady, chartType, showVolume, mas, priceScale, indicator, bollinger]);
+  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger]);
 
   // Build a shareable deep link encoding the current view, copy to clipboard.
   const onShare = React.useCallback(() => {
@@ -476,7 +501,7 @@ export default function LiveChart({
     params.set("vol", showVolume ? "1" : "0");
     if (mas.length) params.set("ma", mas.join(","));
     params.set("scale", priceScale);
-    params.set("ind", indicator);
+    if (indicators.length) params.set("ind", indicators.join(","));
     if (bollinger) params.set("bb", "1");
     const url = `${window.location.origin}/c/${encodeURIComponent(symbol)}?${params}`;
     const done = () => {
@@ -485,7 +510,7 @@ export default function LiveChart({
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     };
     navigator.clipboard?.writeText(url).then(done).catch(done);
-  }, [range, chartType, showVolume, mas, priceScale, indicator, bollinger, symbol]);
+  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, symbol]);
 
   // ── Price flash on tick ────────────────────────────────────────────────────
   // The CandleChart owns all rendering; here we only watch the price for the
@@ -746,21 +771,24 @@ export default function LiveChart({
                 })}
               </div>
 
-              {/* Oscillator panel: none / RSI / MACD */}
+              {/* Oscillator panes: toggle up to MAX_PANES (RSI/MACD/Stoch/ATR/OBV) */}
               <div className="inline-flex rounded-full border border-card-border bg-card p-1">
                 {INDICATOR_OPTIONS.map((o) => {
-                  const active = indicator === o.key;
+                  const active = indicators.includes(o.key);
+                  const full = !active && indicators.length >= MAX_PANES;
                   return (
                     <button
                       key={o.key}
-                      onClick={() => setIndicator(o.key)}
-                      className="rounded-full px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                      onClick={() => toggleIndicator(o.key)}
+                      disabled={full}
+                      className="rounded-full px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
                       style={
                         active
                           ? { background: UP, color: "#000" }
                           : { color: "var(--muted-foreground)" }
                       }
                       aria-pressed={active}
+                      title={full ? `Up to ${MAX_PANES} panes` : `${o.label} pane`}
                     >
                       {o.label}
                     </button>
@@ -853,7 +881,7 @@ export default function LiveChart({
                   showVolume={showVolume}
                   mas={mas}
                   priceScale={priceScale}
-                  indicator={indicator}
+                  indicators={indicators}
                   bollinger={bollinger}
                   displayStartTime={data.displayStartTime}
                   className="absolute inset-0"
