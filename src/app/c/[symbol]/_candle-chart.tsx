@@ -81,6 +81,11 @@ interface CandleChartProps {
   mas?: number[]; // SMA periods to overlay, e.g. [20, 50]; empty = none
   priceScale?: PriceScale;
   indicator?: Indicator; // oscillator sub-panel below the chart
+  // UTC seconds of the first candle to *show*. The `candles` array may extend
+  // earlier (warmup bars so RSI/MACD/MA are fully defined across the visible
+  // window); the initial view starts here and the warmup stays off-screen but
+  // pannable. Undefined = show the whole array.
+  displayStartTime?: number;
 }
 
 // ── Number / time formatting ─────────────────────────────────────────────────
@@ -256,6 +261,7 @@ export default function CandleChart({
   mas = [],
   priceScale = "linear",
   indicator = "none",
+  displayStartTime,
 }: CandleChartProps) {
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -271,6 +277,7 @@ export default function CandleChart({
   const masRef = React.useRef<number[]>(mas);
   const priceScaleRef = React.useRef<PriceScale>(priceScale);
   const indicatorRef = React.useRef<Indicator>(indicator);
+  const displayStartRef = React.useRef<number | undefined>(displayStartTime);
 
   // Bridge to the mount-effect closures so the data effect can drive a repaint.
   const apiRef = React.useRef<{
@@ -414,10 +421,21 @@ export default function CandleChart({
     };
 
     const fit = () => {
-      const len = candlesRef.current.length;
+      const cs = candlesRef.current;
+      const len = cs.length;
       if (len === 0) return;
-      const rightPad = Math.max(2, Math.round(len * 0.04));
-      viewRef.current = { from: -1, to: len + rightPad };
+      // Start the view at the first candle the user asked to see; bars before it
+      // are warmup (fetched only so indicators are defined here) and stay
+      // off-screen but pannable. Without a display window, show everything.
+      const dst = displayStartRef.current;
+      let startIdx = 0;
+      if (dst != null) {
+        const found = cs.findIndex((c) => c.time >= dst);
+        startIdx = found < 0 ? 0 : found;
+      }
+      const shown = Math.max(1, len - startIdx);
+      const rightPad = Math.max(2, Math.round(shown * 0.04));
+      viewRef.current = { from: startIdx - 1, to: len + rightPad };
     };
 
     // ── The single source of pixels ──
@@ -1045,6 +1063,7 @@ export default function CandleChart({
     masRef.current = mas;
     priceScaleRef.current = priceScale;
     indicatorRef.current = indicator;
+    displayStartRef.current = displayStartTime;
     // currency is part of the props contract but the renderer formats numbers
     // without a currency symbol; reference it so the dep stays honest.
     void currency;
@@ -1052,21 +1071,28 @@ export default function CandleChart({
     const api = apiRef.current;
     const prevLen = prevLenRef.current;
     if (rangeRef.current !== range || prevLen === 0) {
-      // First paint or range switch: fit the whole set once.
+      // First paint or range switch: fit to the display window once.
       api?.fit();
       rangeRef.current = range;
     } else if (candles.length !== prevLen) {
-      // New bar(s) on a live poll: follow the right edge only if the user was
-      // already looking at it; otherwise leave their view untouched.
       const diff = candles.length - prevLen;
-      if (viewRef.current.to >= prevLen) {
-        viewRef.current.from += diff;
-        viewRef.current.to += diff;
+      // A small append (1-3 bars) is a live poll adding fresh candles: follow the
+      // right edge only if the user was already looking at it. A larger swing
+      // means the source changed (Yahoo↔bot↔Nasdaq) or the warmup size shifted,
+      // so the index mapping is no longer comparable — re-fit cleanly instead of
+      // sliding the stale view by a bogus offset.
+      if (diff > 0 && diff <= 3) {
+        if (viewRef.current.to >= prevLen) {
+          viewRef.current.from += diff;
+          viewRef.current.to += diff;
+        }
+      } else {
+        api?.fit();
       }
     }
     prevLenRef.current = candles.length;
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicator]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicator, displayStartTime]);
 
   return (
     <div ref={wrapRef} className={className}>

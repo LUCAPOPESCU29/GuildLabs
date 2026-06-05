@@ -127,6 +127,9 @@ interface ChartData {
   interval: string;
   rangeLabel: string;
   candles: Candle[];
+  // First candle the user asked to see; the array may start earlier (warmup bars
+  // so indicators are defined across the visible window). Undefined = no warmup.
+  displayStartTime?: number;
 }
 
 // ── Formatting helpers ───────────────────────────────────────────────────────
@@ -644,6 +647,7 @@ export default function LiveChart({
                   mas={mas}
                   priceScale={priceScale}
                   indicator={indicator}
+                  displayStartTime={data.displayStartTime}
                   className="absolute inset-0"
                 />
               )}

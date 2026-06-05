@@ -29,6 +29,51 @@ export const RANGES: Record<Range, RangeConfig> = {
 
 export const DEFAULT_RANGE: Range = "1mo";
 
+// Indicators (RSI 14, MACD 12/26/9, MA50) need a long warmup before they're
+// defined: MACD needs ~35 prior bars, MA50 needs 50. A bare 1-month daily fetch
+// (~22 bars) leaves them blank or stubby. So for the daily/weekly ranges we ask
+// Yahoo for a longer window than we display, keeping the same interval, and tell
+// the chart where the visible window starts (see displayStartSeconds). Intraday
+// ranges (1d/5d) keep their native range — warmup there is handled by the extra
+// pre-market/prior-session bars Yahoo already returns.
+const FETCH_RANGE: Record<Range, string> = {
+  "1d": "1d",
+  "5d": "5d",
+  "1mo": "6mo",
+  "6mo": "1y",
+  "1y": "5y",
+  ytd: "2y",
+};
+
+/**
+ * UTC seconds marking the first candle the user actually requested to see, given
+ * the warmup-extended fetch above. Returns undefined for ranges fetched at their
+ * native size (no warmup, so the whole array is visible).
+ *
+ * Snapped to UTC midnight so the value is stable across the 10-second live polls
+ * — a drifting boundary would make the chart re-fit (and discard the user's
+ * pan/zoom) on every refresh.
+ */
+function displayStartSeconds(range: Range): number | undefined {
+  const midnightDaysAgo = (days: number) => {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    return Math.floor((d.getTime() - days * 86_400_000) / 1000);
+  };
+  switch (range) {
+    case "1mo":
+      return midnightDaysAgo(31);
+    case "6mo":
+      return midnightDaysAgo(186);
+    case "1y":
+      return midnightDaysAgo(366);
+    case "ytd":
+      return Math.floor(Date.UTC(new Date().getUTCFullYear(), 0, 1) / 1000);
+    default:
+      return undefined; // 1d / 5d: no warmup window
+  }
+}
+
 export function isRange(value: string | null | undefined): value is Range {
   return !!value && value in RANGES;
 }
@@ -59,6 +104,11 @@ export interface ChartData {
   interval: string;
   rangeLabel: string;
   candles: Candle[];
+  // UTC seconds of the first candle the user asked to *see*. The candle array
+  // can extend earlier than this (warmup bars fetched so RSI/MACD/MA50 are fully
+  // defined across the visible window); the chart starts its view here and keeps
+  // the warmup off-screen but pannable. Undefined when no warmup was fetched.
+  displayStartTime?: number;
 }
 
 const HOSTS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"];
@@ -156,12 +206,11 @@ async function getSession(force = false): Promise<YahooSession> {
   return sessionInflight;
 }
 
-async function fetchYahoo(symbol: string, range: Range): Promise<unknown> {
-  const cfg = RANGES[range];
+async function fetchYahoo(symbol: string, yahooRange: string, interval: string): Promise<unknown> {
   const buildPath = (crumb?: string) => {
     const qs = new URLSearchParams({
-      range,
-      interval: cfg.interval,
+      range: yahooRange,
+      interval,
       includePrePost: "false",
     });
     if (crumb) qs.set("crumb", crumb);
@@ -432,7 +481,8 @@ export async function getChartData(symbol: string, range: Range): Promise<ChartD
 }
 
 async function getChartDataFromYahoo(symbol: string, range: Range): Promise<ChartData> {
-  const json = (await fetchYahoo(symbol, range)) as {
+  const cfg = RANGES[range];
+  const json = (await fetchYahoo(symbol, FETCH_RANGE[range], cfg.interval)) as {
     chart?: {
       result?: Array<{
         meta?: Record<string, unknown>;
@@ -486,7 +536,6 @@ async function getChartDataFromYahoo(symbol: string, range: Range): Promise<Char
   const changePercent =
     change != null && prevClose ? (change / prevClose) * 100 : null;
 
-  const cfg = RANGES[range];
   return {
     symbol: String(meta.symbol ?? symbol).toUpperCase(),
     name: String(
@@ -506,5 +555,6 @@ async function getChartDataFromYahoo(symbol: string, range: Range): Promise<Char
     interval: cfg.interval,
     rangeLabel: cfg.label,
     candles,
+    displayStartTime: displayStartSeconds(range),
   };
 }
