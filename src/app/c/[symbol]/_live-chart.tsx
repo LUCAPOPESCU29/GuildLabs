@@ -134,6 +134,7 @@ interface ChartPrefs {
   rib: boolean;
   cr: boolean;
   cfg: IndicatorSettings;
+  dw: boolean;
 }
 
 // Validate a partial settings object, keeping only sane positive numbers.
@@ -201,6 +202,7 @@ function readStoredPrefs(): Partial<ChartPrefs> {
     if (typeof p.cr === "boolean") out.cr = p.cr;
     const cfg = sanitizeSettings(p.cfg);
     if (cfg) out.cfg = cfg;
+    if (typeof p.dw === "boolean") out.dw = p.dw;
     const ma = sanitizeMas(p.ma);
     if (ma) out.ma = ma;
     return out;
@@ -240,6 +242,8 @@ function readUrlPrefs(): Partial<ChartPrefs> {
   if (rib === "0" || rib === "1") out.rib = rib === "1";
   const cr = q.get("cr");
   if (cr === "0" || cr === "1") out.cr = cr === "1";
+  const dw = q.get("dw");
+  if (dw === "0" || dw === "1") out.dw = dw === "1";
   const cfgRaw = q.get("cfg");
   if (cfgRaw) {
     try {
@@ -457,6 +461,8 @@ export default function LiveChart({
   const [crosses, setCrosses] = React.useState(false);
   const [settings, setSettings] = React.useState<IndicatorSettings>(DEFAULT_INDICATOR_SETTINGS);
   const [showSettings, setShowSettings] = React.useState(false);
+  const [dataWindow, setDataWindow] = React.useState(false);
+  const [showHelp, setShowHelp] = React.useState(false);
   const [maInput, setMaInput] = React.useState("");
   const [emaInput, setEmaInput] = React.useState("");
   const [searchValue, setSearchValue] = React.useState("");
@@ -628,6 +634,7 @@ export default function LiveChart({
     if (p.rib != null) setRibbon(p.rib);
     if (p.cr != null) setCrosses(p.cr);
     if (p.cfg != null) setSettings(p.cfg);
+    if (p.dw != null) setDataWindow(p.dw);
     // compare ticker rides the URL only (not localStorage)
     const cmp = new URLSearchParams(window.location.search).get("cmp");
     if (cmp) setCompareSymbol(cmp.toUpperCase());
@@ -651,12 +658,13 @@ export default function LiveChart({
         rib: ribbon,
         cr: crosses,
         cfg: settings,
+        dw: dataWindow,
       };
       window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     } catch {
       // storage full / disabled — non-fatal
     }
-  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, settings]);
+  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, settings, dataWindow]);
 
   // Build a shareable deep link encoding the current view, copy to clipboard.
   const onShare = React.useCallback(() => {
@@ -677,6 +685,7 @@ export default function LiveChart({
     if (JSON.stringify(settings) !== JSON.stringify(DEFAULT_INDICATOR_SETTINGS)) {
       params.set("cfg", encodeURIComponent(JSON.stringify(settings)));
     }
+    if (dataWindow) params.set("dw", "1");
     if (compareSymbol) params.set("cmp", compareSymbol);
     const url = `${window.location.origin}/c/${encodeURIComponent(symbol)}?${params}`;
     const done = () => {
@@ -685,7 +694,7 @@ export default function LiveChart({
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     };
     navigator.clipboard?.writeText(url).then(done).catch(done);
-  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, settings, compareSymbol, symbol]);
+  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, settings, dataWindow, compareSymbol, symbol]);
 
   // ── Price flash on tick ────────────────────────────────────────────────────
   // The CandleChart owns all rendering; here we only watch the price for the
@@ -1201,6 +1210,30 @@ export default function LiveChart({
                 {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
               </button>
 
+              {/* Data window + help toggles */}
+              <button
+                onClick={() => setDataWindow((s) => !s)}
+                className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                style={
+                  dataWindow
+                    ? { background: UP, color: "#000", borderColor: "transparent" }
+                    : { background: "var(--card)", color: "var(--muted-foreground)", borderColor: "var(--card-border)" }
+                }
+                aria-pressed={dataWindow}
+                title="Data window (D)"
+              >
+                Data
+              </button>
+              <button
+                onClick={() => setShowHelp((s) => !s)}
+                className="inline-flex items-center justify-center rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold transition-colors"
+                style={{ background: "var(--card)", color: "var(--muted-foreground)" }}
+                aria-label="Keyboard shortcuts (?)"
+                title="Keyboard shortcuts (?)"
+              >
+                ?
+              </button>
+
               {/* Compare overlay ticker */}
               <form
                 onSubmit={onCompareSubmit}
@@ -1291,6 +1324,9 @@ export default function LiveChart({
                   events={data.events}
                   vwap={vwap}
                   volumeProfile={volumeProfile}
+                  dataWindow={dataWindow}
+                  onToggleDataWindow={() => setDataWindow((s) => !s)}
+                  onToggleHelp={() => setShowHelp((s) => !s)}
                   displayStartTime={data.displayStartTime}
                   className="absolute inset-0"
                 />
@@ -1306,6 +1342,48 @@ export default function LiveChart({
                 >
                   <span className="text-muted-foreground">CLOSE IN</span>
                   <span style={{ color: "var(--accent)" }}>{countdownText}</span>
+                </div>
+              )}
+
+              {/* Keyboard shortcuts / tools cheatsheet */}
+              {showHelp && (
+                <div
+                  className="absolute inset-0 z-20 grid place-items-center p-4"
+                  style={{ background: "color-mix(in oklab, var(--background-deep) 70%, transparent)", backdropFilter: "blur(4px)" }}
+                  onClick={() => setShowHelp(false)}
+                >
+                  <div
+                    className="max-h-full overflow-auto rounded-2xl border border-card-border bg-card p-4 font-mono text-xs"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-6">
+                      <span className="font-bold uppercase tracking-wider text-muted-foreground">Shortcuts</span>
+                      <button onClick={() => setShowHelp(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-x-8 gap-y-1 sm:grid-cols-2">
+                      {[
+                        ["← →", "Pan"],
+                        ["+ / −", "Zoom"],
+                        ["R", "Reset zoom & scale"],
+                        ["F", "Fullscreen"],
+                        ["D", "Data window"],
+                        ["A", "Auto-Fibonacci"],
+                        ["C", "Cycle drawing colour"],
+                        ["⌘Z / ⇧⌘Z", "Undo / redo"],
+                        ["Delete", "Remove selected"],
+                        ["Esc", "Cancel / deselect"],
+                        ["?", "This help"],
+                        ["Shift-drag", "Measure tool"],
+                        ["Drag price axis", "Rescale (2× to auto)"],
+                        ["Tools", "line · trend · ray · arrow · rect · vline · fib · channel · long/short · 🔔 alert · VWAP · text"],
+                      ].map(([k, v]) => (
+                        <div key={k} className="flex items-baseline gap-2">
+                          <span className="whitespace-nowrap font-bold" style={{ color: "var(--accent)" }}>{k}</span>
+                          <span className="text-muted-foreground">{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

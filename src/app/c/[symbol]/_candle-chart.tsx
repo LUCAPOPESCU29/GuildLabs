@@ -169,7 +169,10 @@ interface CandleChartProps {
   events?: Array<{ time: number; type: "div" | "split"; text: string }>; // div/split pins
   vwap?: boolean; // session VWAP overlay on price
   volumeProfile?: boolean; // volume-at-price histogram on the right edge
+  dataWindow?: boolean; // on-chart OHLC + indicator readout panel
   onToggleFullscreen?: () => void; // invoked by the "F" shortcut
+  onToggleDataWindow?: () => void; // invoked by the "D" shortcut
+  onToggleHelp?: () => void; // invoked by the "?" shortcut
   // UTC seconds of the first candle to *show*. The `candles` array may extend
   // earlier (warmup bars so RSI/MACD/MA are fully defined across the visible
   // window); the initial view starts here and the warmup stays off-screen but
@@ -502,7 +505,10 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     events,
     vwap = false,
     volumeProfile = false,
+    dataWindow = false,
     onToggleFullscreen,
+    onToggleDataWindow,
+    onToggleHelp,
     displayStartTime,
   },
   ref
@@ -550,7 +556,10 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const eventsRef = React.useRef(events);
   const vwapRef = React.useRef(vwap);
   const volProfileRef = React.useRef(volumeProfile);
+  const dataWindowRef = React.useRef(dataWindow);
   const onFsRef = React.useRef(onToggleFullscreen);
+  const onDataWindowRef = React.useRef(onToggleDataWindow);
+  const onHelpRef = React.useRef(onToggleHelp);
   const displayStartRef = React.useRef<number | undefined>(displayStartTime);
   const lastPriceRef = React.useRef<number | null>(null);
 
@@ -773,6 +782,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     let drawings: Drawing[] = [];
     let pending: { type: Drawing["type"]; points: Array<{ t: number; p: number }> } | null = null;
     const pendingCursor = { x: 0, y: 0 };
+    // manual (locked) vertical price scale; null = auto-fit to the visible range
+    let manualScale: { lo: number; hi: number } | null = null;
+    let axisDrag: { startY: number; lo: number; hi: number } | null = null;
     // selection + endpoint/body editing (cursor tool)
     let selectedId: string | null = null;
     let editDrag:
@@ -1046,6 +1058,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     };
 
     const priceRange = () => {
+      if (manualScale) return manualScale; // user-locked vertical scale
       const cs = candlesRef.current;
       const v = viewRef.current;
       let lo = Infinity;
@@ -2545,6 +2558,90 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         }
       }
 
+      // ── data window panel (top-right): OHLC + every active indicator value ──
+      if (dataWindowRef.current && cs.length > 0) {
+        const idx = crosshair.on
+          ? Math.max(0, Math.min(cs.length - 1, Math.floor(indexForX(crosshair.x))))
+          : cs.length - 1;
+        const c = cs[idx];
+        const rows: Array<[string, string, string?]> = [];
+        const prevC = idx > 0 ? cs[idx - 1].close : c.open;
+        const chg = prevC ? (c.close / prevC - 1) * 100 : 0;
+        rows.push(["O", fmtPrice(c.open)]);
+        rows.push(["H", fmtPrice(c.high)]);
+        rows.push(["L", fmtPrice(c.low)]);
+        rows.push(["C", fmtPrice(c.close)]);
+        rows.push(["Chg", `${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`, chg >= 0 ? pal.up : pal.down]);
+        if (typeof c.volume === "number") {
+          rows.push(["Vol", fmtVol(c.volume)]);
+          const vma = computeVolMA(cs, s.volMa)[idx];
+          if (vma) rows.push(["RVOL", (c.volume / vma).toFixed(2)]);
+        }
+        const closesArr = cs.map((cc) => cc.close);
+        for (const p of masRef.current) {
+          const val = computeSMA(cs, p)[idx];
+          if (val != null) rows.push([`MA${p}`, fmtPrice(val)]);
+        }
+        for (const p of emasRef.current) {
+          const val = computeEMA(closesArr, p)[idx];
+          if (val != null) rows.push([`EMA${p}`, fmtPrice(val)]);
+        }
+        if (bollingerRef.current) {
+          const bb = computeBollinger(cs, s.bbPeriod, s.bbMult);
+          const u = bb.upper[idx];
+          const l = bb.lower[idx];
+          const m = bb.mid[idx];
+          if (u != null && l != null && m) {
+            rows.push(["BB %B", (((c.close - l) / (u - l)) * 100).toFixed(0)]);
+            rows.push(["BB BW", (((u - l) / m) * 100).toFixed(1)]);
+          }
+        }
+        if (vwapRef.current) {
+          const val = computeVWAP(undefined, intra)[idx];
+          if (val != null) rows.push(["VWAP", fmtPrice(val)]);
+        }
+        for (const kind of indicatorsRef.current) {
+          if (kind === "rsi") {
+            const val = computeRSI(cs, s.rsi)[idx];
+            if (val != null) rows.push(["RSI", val.toFixed(1)]);
+          } else if (kind === "macd") {
+            const { macd } = computeMACD(cs, s.macdFast, s.macdSlow, s.macdSignal);
+            if (macd[idx] != null) rows.push(["MACD", (macd[idx] as number).toFixed(3)]);
+          } else if (kind === "stoch") {
+            const { k } = computeStochastic(cs, s.stochK, s.stochD);
+            if (k[idx] != null) rows.push(["Stoch %K", (k[idx] as number).toFixed(1)]);
+          } else if (kind === "atr") {
+            const val = computeATR(cs, s.atr)[idx];
+            if (val != null) rows.push(["ATR", fmtPrice(val)]);
+          } else if (kind === "obv") {
+            const val = computeOBV(cs)[idx];
+            if (val != null) rows.push(["OBV", fmtVol(val)]);
+          }
+        }
+        const rowH = 13;
+        const padP = 7;
+        const w = 156;
+        const h = rows.length * rowH + padP * 2;
+        const x0 = L.right - w - 6;
+        const y0 = L.top + 4;
+        roundRect(ctx, x0, y0, w, h, 8);
+        ctx.fillStyle = toRgba(pal.onColorText, 0.85);
+        ctx.fill();
+        ctx.strokeStyle = pal.gridSoft;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.textBaseline = "middle";
+        for (let i = 0; i < rows.length; i++) {
+          const ry = y0 + padP + rowH / 2 + i * rowH;
+          ctx.textAlign = "left";
+          ctx.fillStyle = pal.legendLabel;
+          ctx.fillText(rows[i][0], x0 + 8, ry);
+          ctx.textAlign = "right";
+          ctx.fillStyle = rows[i][2] ?? pal.axisText;
+          ctx.fillText(rows[i][1], x0 + w - 8, ry);
+        }
+      }
+
       // ── measure tool overlay (shift-drag) ──
       if (measure.on) {
         const { x1, y1, x2, y2 } = measure;
@@ -2643,6 +2740,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     };
 
     const reset = () => {
+      manualScale = null; // restore auto vertical scale
       // ease from the current view to the fit target
       const cur = { ...viewRef.current };
       fit();
@@ -2709,6 +2807,17 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       const px = relX(e.clientX);
       const py = relY(e.clientY);
       pointers.set(e.pointerId, { x: px, y: py });
+
+      // Price-axis gutter drag → rescale the vertical (price) scale.
+      const L0 = layout();
+      if (px > L0.right && pointers.size === 1 && !e.shiftKey) {
+        const r = priceRange();
+        manualScale = { lo: r.lo, hi: r.hi };
+        axisDrag = { startY: py, lo: r.lo, hi: r.hi };
+        drag.on = false;
+        crosshair.on = false;
+        return;
+      }
 
       // Drawing tools take priority over pan/measure on a single primary click.
       const dt = toolRef.current;
@@ -2876,6 +2985,15 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         return;
       }
 
+      if (axisDrag) {
+        const factor = Math.exp((y - axisDrag.startY) / 180); // drag down = zoom out
+        const center = (axisDrag.lo + axisDrag.hi) / 2;
+        const half = ((axisDrag.hi - axisDrag.lo) / 2) * factor;
+        manualScale = { lo: center - half, hi: center + half };
+        schedule();
+        return;
+      }
+
       if (editDrag) {
         const d = drawings.find((dd) => dd.id === editDrag!.id);
         if (d) {
@@ -2933,6 +3051,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       if (pointers.size < 2) pinchDist = null;
       if (pointers.size === 0) {
         drag.on = false;
+        axisDrag = null;
         if (editDrag) {
           editDrag = null;
           saveDrawings();
@@ -2970,6 +3089,11 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
 
     const onDblClick = (e: MouseEvent) => {
       e.preventDefault();
+      if (relX(e.clientX) > layout().right) {
+        manualScale = null; // double-click the price axis → auto scale
+        schedule();
+        return;
+      }
       reset();
     };
 
@@ -3037,6 +3161,15 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         case "f":
         case "F":
           onFsRef.current?.();
+          e.preventDefault();
+          break;
+        case "d":
+        case "D":
+          onDataWindowRef.current?.();
+          e.preventDefault();
+          break;
+        case "?":
+          onHelpRef.current?.();
           e.preventDefault();
           break;
         case "a":
@@ -3156,7 +3289,10 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     eventsRef.current = events;
     vwapRef.current = vwap;
     volProfileRef.current = volumeProfile;
+    dataWindowRef.current = dataWindow;
     onFsRef.current = onToggleFullscreen;
+    onDataWindowRef.current = onToggleDataWindow;
+    onHelpRef.current = onToggleHelp;
     displayStartRef.current = displayStartTime;
     // currency is part of the props contract but the renderer formats numbers
     // without a currency symbol; reference it so the dep stays honest.
@@ -3190,7 +3326,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     api?.checkAlerts(lastPriceRef.current, newPrice);
     lastPriceRef.current = newPrice;
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, emas, ribbon, crosses, priceScale, indicators, bollinger, indicatorSettings, symbol, compare, events, vwap, volumeProfile, onToggleFullscreen, displayStartTime]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, emas, ribbon, crosses, priceScale, indicators, bollinger, indicatorSettings, symbol, compare, events, vwap, volumeProfile, dataWindow, onToggleFullscreen, onToggleDataWindow, onToggleHelp, displayStartTime]);
 
   return (
     <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>
