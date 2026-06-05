@@ -10,6 +10,8 @@ import {
   AreaChart,
   BarChart3,
   Search,
+  Share2,
+  Check,
 } from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
@@ -80,6 +82,75 @@ const CRYPTO_PAIR_RE = /^([A-Z0-9]{2,10})-([A-Z]{3,4})$/;
 function isCryptoSymbol(sym: string): boolean {
   const m = sym.toUpperCase().match(CRYPTO_PAIR_RE);
   return !!m && CRYPTO_BASES.has(m[1]) && CRYPTO_VS.has(m[2]);
+}
+
+// ── Persisted display preferences ────────────────────────────────────────────
+// The chart's display settings (type, volume, MAs, scale, indicator) survive
+// reloads via localStorage and are encodable in the URL so a chart link opens in
+// the exact same state. `range` is NOT stored — it lives in the URL / initialRange.
+const PREFS_KEY = "chartit:chart-prefs";
+
+interface ChartPrefs {
+  type: ChartType;
+  vol: boolean;
+  ma: number[];
+  scale: PriceScale;
+  ind: Indicator;
+}
+
+const isChartType = (v: unknown): v is ChartType => v === "candles" || v === "area";
+const isPriceScale = (v: unknown): v is PriceScale =>
+  v === "linear" || v === "log" || v === "percent";
+const isIndicator = (v: unknown): v is Indicator =>
+  v === "none" || v === "rsi" || v === "macd";
+const sanitizeMas = (arr: unknown): number[] | undefined => {
+  if (!Array.isArray(arr)) return undefined;
+  const allowed = MA_OPTIONS as readonly number[];
+  const out = [...new Set(arr.map(Number).filter((n) => allowed.includes(n)))].sort(
+    (a, b) => a - b
+  );
+  return out;
+};
+
+// localStorage prefs (validated). Empty when unavailable/corrupt.
+function readStoredPrefs(): Partial<ChartPrefs> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(PREFS_KEY);
+    if (!raw) return {};
+    const p = JSON.parse(raw) as Record<string, unknown>;
+    const out: Partial<ChartPrefs> = {};
+    if (isChartType(p.type)) out.type = p.type;
+    if (typeof p.vol === "boolean") out.vol = p.vol;
+    if (isPriceScale(p.scale)) out.scale = p.scale;
+    if (isIndicator(p.ind)) out.ind = p.ind;
+    const ma = sanitizeMas(p.ma);
+    if (ma) out.ma = ma;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// URL query prefs (validated). Take precedence over localStorage when present.
+function readUrlPrefs(): Partial<ChartPrefs> {
+  if (typeof window === "undefined") return {};
+  const q = new URLSearchParams(window.location.search);
+  const out: Partial<ChartPrefs> = {};
+  const type = q.get("type");
+  if (isChartType(type)) out.type = type;
+  const vol = q.get("vol");
+  if (vol === "0" || vol === "1") out.vol = vol === "1";
+  const scale = q.get("scale");
+  if (isPriceScale(scale)) out.scale = scale;
+  const ind = q.get("ind");
+  if (isIndicator(ind)) out.ind = ind;
+  const ma = q.get("ma");
+  if (ma != null) {
+    const parsed = sanitizeMas(ma.split(",").map((s) => Number(s.trim())));
+    if (parsed) out.ma = parsed;
+  }
+  return out;
 }
 
 // Polling cadence for the live feel. 10s is the sweet spot: noticeably alive
@@ -268,6 +339,11 @@ export default function LiveChart({
   const [priceScale, setPriceScale] = React.useState<PriceScale>("linear");
   const [indicator, setIndicator] = React.useState<Indicator>("none");
   const [searchValue, setSearchValue] = React.useState("");
+  // Gate prefs persistence until the stored/URL prefs have been applied, so the
+  // first render's defaults don't clobber what the user previously saved.
+  const [prefsReady, setPrefsReady] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const copiedTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const prevPriceRef = React.useRef<number | null>(null);
   const flashTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -331,6 +407,56 @@ export default function LiveChart({
     const id = setInterval(() => setTickNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // ── Apply persisted/URL prefs once, client-side after mount ────────────────
+  // Initial render uses the deterministic defaults (so SSR and hydration match),
+  // then this effect overlays the user's saved settings / shared-link params.
+  // URL params win over localStorage.
+  React.useEffect(() => {
+    const p = { ...readStoredPrefs(), ...readUrlPrefs() };
+    if (p.type != null) setChartType(p.type);
+    if (p.vol != null) setShowVolume(p.vol);
+    if (p.ma != null) setMas(p.ma);
+    if (p.scale != null) setPriceScale(p.scale);
+    if (p.ind != null) setIndicator(p.ind);
+    setPrefsReady(true);
+  }, []);
+
+  // Persist display prefs whenever they change (after the initial apply).
+  React.useEffect(() => {
+    if (!prefsReady || typeof window === "undefined") return;
+    try {
+      const prefs: ChartPrefs = {
+        type: chartType,
+        vol: showVolume,
+        ma: mas,
+        scale: priceScale,
+        ind: indicator,
+      };
+      window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+      // storage full / disabled — non-fatal
+    }
+  }, [prefsReady, chartType, showVolume, mas, priceScale, indicator]);
+
+  // Build a shareable deep link encoding the current view, copy to clipboard.
+  const onShare = React.useCallback(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams();
+    params.set("range", range);
+    params.set("type", chartType);
+    params.set("vol", showVolume ? "1" : "0");
+    if (mas.length) params.set("ma", mas.join(","));
+    params.set("scale", priceScale);
+    params.set("ind", indicator);
+    const url = `${window.location.origin}/c/${encodeURIComponent(symbol)}?${params}`;
+    const done = () => {
+      setCopied(true);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
+    };
+    navigator.clipboard?.writeText(url).then(done).catch(done);
+  }, [range, chartType, showVolume, mas, priceScale, indicator, symbol]);
 
   // ── Price flash on tick ────────────────────────────────────────────────────
   // The CandleChart owns all rendering; here we only watch the price for the
@@ -608,6 +734,22 @@ export default function LiveChart({
                   );
                 })}
               </div>
+
+              {/* Share current view */}
+              <button
+                onClick={onShare}
+                className="inline-flex items-center gap-1.5 rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                style={
+                  copied
+                    ? { background: UP, color: "#000", borderColor: "transparent" }
+                    : { background: "var(--card)", color: "var(--muted-foreground)" }
+                }
+                aria-label="Copy a shareable link to this chart"
+                title="Copy a shareable link to this chart"
+              >
+                {copied ? <Check className="size-3.5" /> : <Share2 className="size-3.5" />}
+                {copied ? "Copied" : "Share"}
+              </button>
             </div>
 
             {/* Ticker search */}
