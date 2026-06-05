@@ -8,19 +8,22 @@ import {
   RefreshCw,
   CandlestickChart,
   AreaChart,
-  BarChart3,
   Search,
   Share2,
   Check,
   Camera,
   Maximize2,
   Minimize2,
-  Settings2,
   Play,
   Pause,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   X,
+  Layers,
+  GitCompare,
+  HelpCircle,
+  Table,
 } from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
@@ -465,7 +468,7 @@ export default function LiveChart({
   const [ribbon, setRibbon] = React.useState(false);
   const [crosses, setCrosses] = React.useState(false);
   const [settings, setSettings] = React.useState<IndicatorSettings>(DEFAULT_INDICATOR_SETTINGS);
-  const [showSettings, setShowSettings] = React.useState(false);
+  const [showIndicators, setShowIndicators] = React.useState(false);
   const [dataWindow, setDataWindow] = React.useState(false);
   const [showHelp, setShowHelp] = React.useState(false);
   const [replay, setReplay] = React.useState(false);
@@ -488,6 +491,7 @@ export default function LiveChart({
   const flashTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const chartRef = React.useRef<CandleChartHandle>(null);
   const cardRef = React.useRef<HTMLDivElement>(null);
+  const indicatorsBoxRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
 
   const onScreenshot = React.useCallback(() => {
@@ -506,6 +510,18 @@ export default function LiveChart({
     document.addEventListener("fullscreenchange", onFs);
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
+
+  // Close the Indicators popover on an outside click.
+  React.useEffect(() => {
+    if (!showIndicators) return;
+    const onDown = (e: PointerEvent) => {
+      if (indicatorsBoxRef.current && !indicatorsBoxRef.current.contains(e.target as Node)) {
+        setShowIndicators(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [showIndicators]);
 
   const toggleMa = React.useCallback((period: number) => {
     setMas((prev) =>
@@ -747,6 +763,12 @@ export default function LiveChart({
     if (data.price != null) prevPriceRef.current = data.price;
   }, [data]);
 
+  const activeIndicatorCount =
+    mas.length +
+    emas.length +
+    indicators.length +
+    [bollinger, vwap, volumeProfile, ribbon, crosses].filter(Boolean).length;
+
   const up = (data?.change ?? 0) >= 0;
   const accent = up ? UP : DOWN;
   const market = marketLabel(data?.marketState ?? null);
@@ -896,250 +918,191 @@ export default function LiveChart({
             </div>
           </div>
 
-          {/* ── Chart controls: type · volume · MAs · search ──────────────── */}
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Chart type: candles · hollow · Heikin-Ashi · area · baseline */}
-              <div className="inline-flex rounded-full border border-card-border bg-card p-1">
-                {([
-                  ["candles", "Candles", CandlestickChart],
-                  ["hollow", "Hollow", null],
-                  ["heikin", "HA", null],
-                  ["area", "Area", AreaChart],
-                  ["baseline", "Base", null],
-                ] as const).map(([key, label, Icon]) => {
-                  const active = chartType === key;
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => setChartType(key)}
-                      className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                      style={
-                        active
-                          ? { background: UP, color: "#000" }
-                          : { color: "var(--muted-foreground)" }
-                      }
-                      aria-pressed={active}
-                      title={`${label} chart`}
-                    >
-                      {Icon ? <Icon className="size-3.5" /> : null}
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Volume toggle */}
-              <button
-                onClick={() => setShowVolume((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                style={
-                  showVolume
-                    ? { background: UP, color: "#000", borderColor: "transparent" }
-                    : { background: "var(--card)", color: "var(--muted-foreground)" }
-                }
-                aria-pressed={showVolume}
-              >
-                <BarChart3 className="size-3.5" />
-                Vol
-              </button>
-
-              {/* Moving-average pills */}
-              {MA_OPTIONS.map((p) => {
-                const active = mas.includes(p);
-                const color = MA_COLORS[mas.indexOf(p) % MA_COLORS.length];
+          {/* ── Toolbar (chart type · scale · indicators · actions) ───────── */}
+          <div className="anim-rise mt-3 flex flex-wrap items-center gap-2">
+            {/* Chart type */}
+            <div className="inline-flex items-center rounded-full border border-card-border bg-card p-1">
+              {([
+                ["candles", "Candles", CandlestickChart],
+                ["hollow", "Hollow", null],
+                ["heikin", "HA", null],
+                ["area", "Area", AreaChart],
+                ["baseline", "Base", null],
+              ] as const).map(([key, label, Icon]) => {
+                const active = chartType === key;
                 return (
                   <button
-                    key={p}
-                    onClick={() => toggleMa(p)}
-                    className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                    style={
-                      active
-                        ? { background: color, color: "#000", borderColor: "transparent" }
-                        : {
-                            background: "var(--card)",
-                            color: "var(--muted-foreground)",
-                            borderColor: "var(--card-border)",
-                          }
-                    }
+                    key={key}
+                    onClick={() => setChartType(key)}
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-all active:scale-95"
+                    style={active ? { background: UP, color: "#000" } : { color: "var(--muted-foreground)" }}
                     aria-pressed={active}
+                    title={`${label} chart`}
                   >
-                    MA{p}
+                    {Icon ? <Icon className="size-3.5" /> : null}
+                    {label}
                   </button>
                 );
               })}
+            </div>
 
-              {/* EMA pills (dashed overlays) */}
-              {EMA_OPTIONS.map((p) => {
-                const active = emas.includes(p);
-                const color = MA_COLORS[emas.indexOf(p) % MA_COLORS.length];
+            {/* Price scale */}
+            <div className="inline-flex items-center rounded-full border border-card-border bg-card p-1">
+              {SCALE_OPTIONS.map((sc) => {
+                const active = priceScale === sc.key;
                 return (
                   <button
-                    key={`ema${p}`}
-                    onClick={() => toggleEma(p)}
-                    className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                    style={
-                      active
-                        ? { background: color, color: "#000", borderColor: "transparent" }
-                        : {
-                            background: "var(--card)",
-                            color: "var(--muted-foreground)",
-                            borderColor: "var(--card-border)",
-                          }
-                    }
+                    key={sc.key}
+                    onClick={() => setPriceScale(sc.key)}
+                    className="rounded-full px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-all active:scale-95"
+                    style={active ? { background: UP, color: "#000" } : { color: "var(--muted-foreground)" }}
                     aria-pressed={active}
-                    title={`EMA ${p}`}
+                    title={`${sc.label} price scale`}
                   >
-                    E{p}
+                    {sc.label}
                   </button>
                 );
               })}
+            </div>
 
-              {/* EMA ribbon + golden/death cross toggles */}
-              {([
-                ["Ribbon", ribbon, () => setRibbon((s) => !s), "EMA ribbon (8/13/21/34/55)"],
-                ["X-up", crosses, () => setCrosses((s) => !s), "Golden / death cross markers (EMA 50/200)"],
-              ] as const).map(([label, active, onClick, title]) => (
-                <button
-                  key={label}
-                  onClick={onClick}
-                  className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                  style={
-                    active
-                      ? { background: UP, color: "#000", borderColor: "transparent" }
-                      : {
-                          background: "var(--card)",
-                          color: "var(--muted-foreground)",
-                          borderColor: "var(--card-border)",
-                        }
-                  }
-                  aria-pressed={active}
-                  title={title}
-                >
-                  {label}
-                </button>
-              ))}
-
-              {/* Price scale: linear / log / % */}
-              <div className="inline-flex rounded-full border border-card-border bg-card p-1">
-                {SCALE_OPTIONS.map((s) => {
-                  const active = priceScale === s.key;
-                  return (
-                    <button
-                      key={s.key}
-                      onClick={() => setPriceScale(s.key)}
-                      className="rounded-full px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                      style={
-                        active
-                          ? { background: UP, color: "#000" }
-                          : { color: "var(--muted-foreground)" }
-                      }
-                      aria-pressed={active}
-                      title={`${s.label} price scale`}
-                    >
-                      {s.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Oscillator panes: toggle up to MAX_PANES (RSI/MACD/Stoch/ATR/OBV) */}
-              <div className="inline-flex rounded-full border border-card-border bg-card p-1">
-                {INDICATOR_OPTIONS.map((o) => {
-                  const active = indicators.includes(o.key);
-                  const full = !active && indicators.length >= MAX_PANES;
-                  return (
-                    <button
-                      key={o.key}
-                      onClick={() => toggleIndicator(o.key)}
-                      disabled={full}
-                      className="rounded-full px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
-                      style={
-                        active
-                          ? { background: UP, color: "#000" }
-                          : { color: "var(--muted-foreground)" }
-                      }
-                      aria-pressed={active}
-                      title={full ? `Up to ${MAX_PANES} panes` : `${o.label} pane`}
-                    >
-                      {o.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Bollinger Bands toggle */}
+            {/* Indicators popover */}
+            <div className="relative" ref={indicatorsBoxRef}>
               <button
-                onClick={() => setBollinger((b) => !b)}
-                className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                style={
-                  bollinger
-                    ? { background: UP, color: "#000", borderColor: "transparent" }
-                    : {
-                        background: "var(--card)",
-                        color: "var(--muted-foreground)",
-                        borderColor: "var(--card-border)",
-                      }
-                }
-                aria-pressed={bollinger}
-                title="Bollinger Bands (20, 2σ)"
+                onClick={() => setShowIndicators((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-card-border bg-card px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-all active:scale-95"
+                style={showIndicators ? { color: "var(--foreground)" } : { color: "var(--muted-foreground)" }}
+                aria-pressed={showIndicators}
+                title="Indicators & overlays"
               >
-                BB
-              </button>
-
-              {/* VWAP + Volume Profile toggles */}
-              {([
-                ["VWAP", vwap, () => setVwap((s) => !s), "Volume-weighted average price"],
-                ["VP", volumeProfile, () => setVolumeProfile((s) => !s), "Volume profile (volume-at-price)"],
-              ] as const).map(([label, active, onClick, title]) => (
-                <button
-                  key={label}
-                  onClick={onClick}
-                  className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                  style={
-                    active
-                      ? { background: UP, color: "#000", borderColor: "transparent" }
-                      : {
-                          background: "var(--card)",
-                          color: "var(--muted-foreground)",
-                          borderColor: "var(--card-border)",
-                        }
-                  }
-                  aria-pressed={active}
-                  title={title}
-                >
-                  {label}
-                </button>
-              ))}
-
-              {/* Indicator settings popover */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowSettings((s) => !s)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                  style={
-                    showSettings
-                      ? { background: UP, color: "#000", borderColor: "transparent" }
-                      : { background: "var(--card)", color: "var(--muted-foreground)" }
-                  }
-                  aria-pressed={showSettings}
-                  title="Indicator settings"
-                >
-                  <Settings2 className="size-3.5" />
-                </button>
-                {showSettings && (
-                  <div
-                    className="absolute left-0 top-full z-30 mt-2 w-64 rounded-2xl border border-card-border p-3 shadow-xl"
-                    style={{ background: "var(--card)" }}
+                <Layers className="size-3.5" />
+                Indicators
+                {activeIndicatorCount > 0 && (
+                  <span
+                    className="rounded-full px-1.5 text-[10px] font-bold tabular-nums"
+                    style={{ background: UP, color: "#000" }}
                   >
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                        Indicator settings
+                    {activeIndicatorCount}
+                  </span>
+                )}
+                <ChevronDown className={`size-3 transition-transform ${showIndicators ? "rotate-180" : ""}`} />
+              </button>
+              {showIndicators && (
+                <div
+                  className="anim-pop absolute left-0 top-full z-30 mt-2 w-80 space-y-3 rounded-2xl border border-card-border p-3 shadow-xl"
+                  style={{ background: "var(--card)" }}
+                >
+                  <div>
+                    <div className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      Overlays
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {([
+                        ["Vol", showVolume, () => setShowVolume((v) => !v)],
+                        ["BB", bollinger, () => setBollinger((v) => !v)],
+                        ["VWAP", vwap, () => setVwap((v) => !v)],
+                        ["VP", volumeProfile, () => setVolumeProfile((v) => !v)],
+                        ["Ribbon", ribbon, () => setRibbon((v) => !v)],
+                        ["Cross", crosses, () => setCrosses((v) => !v)],
+                      ] as const).map(([label, active, onClick]) => (
+                        <button
+                          key={label}
+                          onClick={onClick}
+                          className="rounded-full border px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wider transition-all active:scale-95"
+                          style={
+                            active
+                              ? { background: UP, color: "#000", borderColor: "transparent" }
+                              : { background: "var(--card)", color: "var(--muted-foreground)", borderColor: "var(--card-border)" }
+                          }
+                          aria-pressed={active}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      Moving averages
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {MA_OPTIONS.map((p) => {
+                        const active = mas.includes(p);
+                        const color = MA_COLORS[mas.indexOf(p) % MA_COLORS.length];
+                        return (
+                          <button
+                            key={`ma${p}`}
+                            onClick={() => toggleMa(p)}
+                            className="rounded-full border px-2.5 py-1 font-mono text-[11px] font-bold uppercase transition-all active:scale-95"
+                            style={
+                              active
+                                ? { background: color, color: "#000", borderColor: "transparent" }
+                                : { background: "var(--card)", color: "var(--muted-foreground)", borderColor: "var(--card-border)" }
+                            }
+                            aria-pressed={active}
+                          >
+                            MA{p}
+                          </button>
+                        );
+                      })}
+                      {EMA_OPTIONS.map((p) => {
+                        const active = emas.includes(p);
+                        const color = MA_COLORS[emas.indexOf(p) % MA_COLORS.length];
+                        return (
+                          <button
+                            key={`ema${p}`}
+                            onClick={() => toggleEma(p)}
+                            className="rounded-full border px-2.5 py-1 font-mono text-[11px] font-bold uppercase transition-all active:scale-95"
+                            style={
+                              active
+                                ? { background: color, color: "#000", borderColor: "transparent" }
+                                : { background: "var(--card)", color: "var(--muted-foreground)", borderColor: "var(--card-border)" }
+                            }
+                            aria-pressed={active}
+                          >
+                            E{p}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      Panes <span className="text-muted-foreground/60">· up to {MAX_PANES}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {INDICATOR_OPTIONS.map((o) => {
+                        const active = indicators.includes(o.key);
+                        const full = !active && indicators.length >= MAX_PANES;
+                        return (
+                          <button
+                            key={o.key}
+                            onClick={() => toggleIndicator(o.key)}
+                            disabled={full}
+                            className="rounded-full border px-2.5 py-1 font-mono text-[11px] font-bold uppercase transition-all active:scale-95 disabled:opacity-40"
+                            style={
+                              active
+                                ? { background: UP, color: "#000", borderColor: "transparent" }
+                                : { background: "var(--card)", color: "var(--muted-foreground)", borderColor: "var(--card-border)" }
+                            }
+                            aria-pressed={active}
+                          >
+                            {o.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-card-border pt-2">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                        Parameters
                       </span>
                       <button
                         onClick={() => setSettings(DEFAULT_INDICATOR_SETTINGS)}
-                        className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                        title="Reset to defaults"
+                        className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
                       >
                         Reset
                       </button>
@@ -1156,35 +1119,20 @@ export default function LiveChart({
                             value={settings[f.key]}
                             onChange={(e) => {
                               const n = Number(e.target.value);
-                              if (Number.isFinite(n) && n > 0 && n <= 400) {
-                                setSettings((s) => ({ ...s, [f.key]: n }));
-                              }
+                              if (Number.isFinite(n) && n > 0 && n <= 400) setSettings((st) => ({ ...st, [f.key]: n }));
                             }}
                             className="w-14 rounded border border-card-border bg-background px-1.5 py-0.5 text-right font-mono text-xs text-foreground focus:outline-none"
                           />
                         </label>
                       ))}
                     </div>
-                    <div className="mt-3 space-y-1.5 border-t border-card-border pt-2">
+                    <div className="mt-2 space-y-1.5">
                       {([
                         ["MA", maInput, setMaInput, mas, toggleMa] as const,
                         ["EMA", emaInput, setEmaInput, emas, toggleEma] as const,
                       ]).map(([label, val, setVal, active, toggle]) => (
                         <div key={label} className="flex items-center gap-1.5">
                           <span className="w-8 font-mono text-[10px] text-muted-foreground">{label}</span>
-                          <div className="flex flex-1 flex-wrap gap-1">
-                            {active.map((p) => (
-                              <button
-                                key={p}
-                                onClick={() => toggle(p)}
-                                className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold"
-                                style={{ background: UP, color: "#000" }}
-                                title="Remove"
-                              >
-                                {p}✕
-                              </button>
-                            ))}
-                          </div>
                           <input
                             type="number"
                             min={1}
@@ -1198,103 +1146,24 @@ export default function LiveChart({
                                 setVal("");
                               }
                             }}
-                            placeholder="add"
-                            className="w-12 rounded border border-card-border bg-background px-1.5 py-0.5 text-right font-mono text-[10px] text-foreground placeholder:normal-case focus:outline-none"
+                            placeholder="add period"
+                            className="w-full rounded border border-card-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-foreground placeholder:normal-case focus:outline-none"
                           />
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+            </div>
 
-              {/* Share current view */}
-              <button
-                onClick={onShare}
-                className="inline-flex items-center gap-1.5 rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                style={
-                  copied
-                    ? { background: UP, color: "#000", borderColor: "transparent" }
-                    : { background: "var(--card)", color: "var(--muted-foreground)" }
-                }
-                aria-label="Copy a shareable link to this chart"
-                title="Copy a shareable link to this chart"
-              >
-                {copied ? <Check className="size-3.5" /> : <Share2 className="size-3.5" />}
-                {copied ? "Copied" : "Share"}
-              </button>
-
-              {/* Screenshot / PNG export */}
-              <button
-                onClick={onScreenshot}
-                className="inline-flex items-center gap-1.5 rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                style={{ background: "var(--card)", color: "var(--muted-foreground)" }}
-                aria-label="Download a PNG of this chart"
-                title="Download a PNG of this chart"
-              >
-                <Camera className="size-3.5" />
-                PNG
-              </button>
-
-              {/* Fullscreen toggle (or press F) */}
-              <button
-                onClick={toggleFullscreen}
-                className="inline-flex items-center gap-1.5 rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                style={{ background: "var(--card)", color: "var(--muted-foreground)" }}
-                aria-label="Toggle fullscreen (F)"
-                title="Toggle fullscreen (F)"
-              >
-                {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-              </button>
-
-              {/* Data window + help toggles */}
-              <button
-                onClick={() => setDataWindow((s) => !s)}
-                className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                style={
-                  dataWindow
-                    ? { background: UP, color: "#000", borderColor: "transparent" }
-                    : { background: "var(--card)", color: "var(--muted-foreground)", borderColor: "var(--card-border)" }
-                }
-                aria-pressed={dataWindow}
-                title="Data window (D)"
-              >
-                Data
-              </button>
-              <button
-                onClick={() => setShowHelp((s) => !s)}
-                className="inline-flex items-center justify-center rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold transition-colors"
-                style={{ background: "var(--card)", color: "var(--muted-foreground)" }}
-                aria-label="Keyboard shortcuts (?)"
-                title="Keyboard shortcuts (?)"
-              >
-                ?
-              </button>
-
-              {/* Replay mode */}
-              <button
-                onClick={() => (replay ? exitReplay() : enterReplay())}
-                className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
-                style={
-                  replay
-                    ? { background: UP, color: "#000", borderColor: "transparent" }
-                    : { background: "var(--card)", color: "var(--muted-foreground)", borderColor: "var(--card-border)" }
-                }
-                aria-pressed={replay}
-                title="Bar replay"
-              >
-                <Play className="size-3.5" />
-                Replay
-              </button>
-
-              {/* Compare overlay ticker */}
+            {/* Right cluster: compare · actions · search */}
+            <div className="ml-auto flex flex-wrap items-center gap-2">
               <form
                 onSubmit={onCompareSubmit}
                 className="inline-flex items-center gap-1.5 rounded-full border border-card-border bg-card px-3 py-1.5"
               >
-                <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  vs
-                </span>
+                <GitCompare className="size-3.5 text-muted-foreground" />
                 {compareSymbol ? (
                   <button
                     type="button"
@@ -1309,32 +1178,89 @@ export default function LiveChart({
                   <input
                     value={compareInput}
                     onChange={(e) => setCompareInput(e.target.value)}
-                    placeholder="Compare…"
+                    placeholder="Compare"
                     aria-label="Compare ticker"
                     spellCheck={false}
                     autoCapitalize="characters"
-                    className="w-20 bg-transparent font-mono text-xs uppercase tracking-wider text-foreground placeholder:text-muted-foreground/60 placeholder:normal-case focus:outline-none"
+                    className="w-16 bg-transparent font-mono text-xs uppercase tracking-wider text-foreground placeholder:text-muted-foreground/60 placeholder:normal-case focus:outline-none"
                   />
                 )}
               </form>
-            </div>
 
-            {/* Ticker search */}
-            <form
-              onSubmit={onSearch}
-              className="inline-flex items-center gap-2 rounded-full border border-card-border bg-card px-3 py-1.5"
-            >
-              <Search className="size-3.5 text-muted-foreground" />
-              <input
-                value={searchValue}
-                onChange={(e) => setSearchValue(e.target.value)}
-                placeholder="Search ticker…"
-                aria-label="Search ticker"
-                spellCheck={false}
-                autoCapitalize="characters"
-                className="w-28 bg-transparent font-mono text-xs uppercase tracking-wider text-foreground placeholder:text-muted-foreground/60 placeholder:normal-case focus:outline-none"
-              />
-            </form>
+              <div className="inline-flex items-center rounded-full border border-card-border bg-card p-1">
+                <button
+                  onClick={() => (replay ? exitReplay() : enterReplay())}
+                  title="Bar replay"
+                  aria-label="Bar replay"
+                  aria-pressed={replay}
+                  className="flex h-7 w-7 items-center justify-center rounded-full transition-all active:scale-90"
+                  style={replay ? { background: UP, color: "#000" } : { color: "var(--muted-foreground)" }}
+                >
+                  {replay ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+                </button>
+                <button
+                  onClick={() => setDataWindow((v) => !v)}
+                  title="Data window (D)"
+                  aria-label="Data window"
+                  aria-pressed={dataWindow}
+                  className="flex h-7 w-7 items-center justify-center rounded-full transition-all active:scale-90"
+                  style={dataWindow ? { background: UP, color: "#000" } : { color: "var(--muted-foreground)" }}
+                >
+                  <Table className="size-3.5" />
+                </button>
+                <button
+                  onClick={onShare}
+                  title={copied ? "Copied!" : "Copy share link"}
+                  aria-label="Share"
+                  className="flex h-7 w-7 items-center justify-center rounded-full transition-all active:scale-90"
+                  style={copied ? { background: UP, color: "#000" } : { color: "var(--muted-foreground)" }}
+                >
+                  {copied ? <Check className="size-3.5" /> : <Share2 className="size-3.5" />}
+                </button>
+                <button
+                  onClick={onScreenshot}
+                  title="Download PNG"
+                  aria-label="Download PNG"
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-all active:scale-90"
+                >
+                  <Camera className="size-3.5" />
+                </button>
+                <button
+                  onClick={toggleFullscreen}
+                  title="Fullscreen (F)"
+                  aria-label="Fullscreen"
+                  aria-pressed={isFullscreen}
+                  className="flex h-7 w-7 items-center justify-center rounded-full transition-all active:scale-90"
+                  style={isFullscreen ? { background: UP, color: "#000" } : { color: "var(--muted-foreground)" }}
+                >
+                  {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                </button>
+                <button
+                  onClick={() => setShowHelp((v) => !v)}
+                  title="Shortcuts (?)"
+                  aria-label="Keyboard shortcuts"
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-all active:scale-90"
+                >
+                  <HelpCircle className="size-3.5" />
+                </button>
+              </div>
+
+              <form
+                onSubmit={onSearch}
+                className="inline-flex items-center gap-2 rounded-full border border-card-border bg-card px-3 py-1.5"
+              >
+                <Search className="size-3.5 text-muted-foreground" />
+                <input
+                  value={searchValue}
+                  onChange={(e) => setSearchValue(e.target.value)}
+                  placeholder="Search ticker…"
+                  aria-label="Search ticker"
+                  spellCheck={false}
+                  autoCapitalize="characters"
+                  className="w-24 bg-transparent font-mono text-xs uppercase tracking-wider text-foreground placeholder:text-muted-foreground/60 placeholder:normal-case focus:outline-none"
+                />
+              </form>
+            </div>
           </div>
 
           {/* ── Chart card ────────────────────────────────────────────────── */}
