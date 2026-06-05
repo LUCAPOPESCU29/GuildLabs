@@ -31,12 +31,19 @@ interface Palette {
   chipText: string;
   onColorText: string;
   legendLabel: string;
+  ma: string[]; // distinct overlay-line colours, one per moving average
 }
+
+// Moving-average overlay colours — kept constant (not theme tokens) and distinct
+// from the green/purple candles so the indicator lines read as separate.
+export const MA_COLORS = ["#e0a93b", "#5b9cf0", "#d678d6"];
 
 // Plot insets: room for the right-hand price axis + bottom time axis.
 const PRICE_W = 60;
 const TIME_H = 22;
 const PAD = 10;
+
+export type ChartType = "candles" | "area";
 
 export interface Candle {
   time: number; // unix seconds
@@ -44,6 +51,7 @@ export interface Candle {
   high: number;
   low: number;
   close: number;
+  volume?: number | null;
 }
 
 interface View {
@@ -57,6 +65,9 @@ interface CandleChartProps {
   currency?: string;
   range: string;
   className?: string;
+  chartType?: ChartType;
+  showVolume?: boolean;
+  mas?: number[]; // SMA periods to overlay, e.g. [20, 50]; empty = none
 }
 
 // ── Number / time formatting ─────────────────────────────────────────────────
@@ -102,6 +113,30 @@ function priceTicks(min: number, max: number, count = 5): number[] {
   return ticks;
 }
 
+// Simple moving average over close prices. Returns an array the same length as
+// `cs`; entries before the period is reached are null (nothing to plot yet).
+function computeSMA(cs: Candle[], period: number): Array<number | null> {
+  const out: Array<number | null> = new Array(cs.length).fill(null);
+  if (period <= 0 || cs.length < period) return out;
+  let sum = 0;
+  for (let i = 0; i < cs.length; i++) {
+    sum += cs[i].close;
+    if (i >= period) sum -= cs[i - period].close;
+    if (i >= period - 1) out[i] = sum / period;
+  }
+  return out;
+}
+
+// Compact volume formatting: 12.3M, 4.5K, etc.
+function fmtVol(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
 function roundRect(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -126,6 +161,9 @@ export default function CandleChart({
   currency,
   range,
   className,
+  chartType = "candles",
+  showVolume = true,
+  mas = [],
 }: CandleChartProps) {
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -136,9 +174,16 @@ export default function CandleChart({
   const viewRef = React.useRef<View>({ from: 0, to: 1 });
   const rangeRef = React.useRef<string | null>(null);
   const prevLenRef = React.useRef(0);
+  const chartTypeRef = React.useRef<ChartType>(chartType);
+  const showVolumeRef = React.useRef(showVolume);
+  const masRef = React.useRef<number[]>(mas);
 
   // Bridge to the mount-effect closures so the data effect can drive a repaint.
-  const apiRef = React.useRef<{ schedule: () => void; fit: () => void } | null>(null);
+  const apiRef = React.useRef<{
+    schedule: () => void;
+    fit: () => void;
+    reset: () => void;
+  } | null>(null);
 
   // ── Build the whole renderer once, on mount ─────────────────────────────────
   React.useEffect(() => {
@@ -184,6 +229,7 @@ export default function CandleChart({
         chipText: hex(tok("--primary-foreground", "#0b0f1a")),
         onColorText: hex(tok("--background-deep", "#0b0f18")),
         legendLabel: rgba(fg, 0.5),
+        ma: MA_COLORS,
       };
     };
     let pal = resolvePalette();
@@ -198,16 +244,33 @@ export default function CandleChart({
     const intraday = () =>
       intervalRef.current.endsWith("m") || intervalRef.current.endsWith("h");
 
-    const layout = () => ({
-      w: size.w,
-      h: size.h,
-      left: PAD,
-      top: PAD,
-      right: size.w - PRICE_W,
-      bottom: size.h - TIME_H,
-      plotW: size.w - PRICE_W - PAD,
-      plotH: size.h - TIME_H - PAD,
-    });
+    const layout = () => {
+      const top = PAD;
+      const bottom = size.h - TIME_H;
+      const innerH = bottom - top;
+      // When volume is on, reserve a band at the bottom of the plot for it and a
+      // small gap so the bars don't crowd the price area.
+      const volH = showVolumeRef.current ? Math.max(28, Math.round(innerH * 0.16)) : 0;
+      const gap = volH > 0 ? 8 : 0;
+      const priceTop = top;
+      const priceBottom = bottom - volH - gap;
+      return {
+        w: size.w,
+        h: size.h,
+        left: PAD,
+        top,
+        right: size.w - PRICE_W,
+        bottom,
+        plotW: size.w - PRICE_W - PAD,
+        plotH: innerH,
+        priceTop,
+        priceBottom,
+        pricePlotH: priceBottom - priceTop,
+        volTop: priceBottom + gap,
+        volBottom: bottom,
+        volH,
+      };
+    };
 
     const barWidth = () => {
       const v = viewRef.current;
@@ -265,14 +328,14 @@ export default function CandleChart({
 
       const { lo, hi } = priceRange();
       const span = hi - lo || 1;
-      const yForPrice = (p: number) => L.top + ((hi - p) / span) * L.plotH;
-      const priceForY = (y: number) => hi - ((y - L.top) / L.plotH) * span;
+      const yForPrice = (p: number) => L.priceTop + ((hi - p) / span) * L.pricePlotH;
+      const priceForY = (y: number) => hi - ((y - L.priceTop) / L.pricePlotH) * span;
 
       // price grid + right-axis labels
       ctx.textAlign = "left";
       for (const p of priceTicks(lo, hi, 5)) {
         const y = yForPrice(p);
-        if (y < L.top - 1 || y > L.bottom + 1) continue;
+        if (y < L.priceTop - 1 || y > L.priceBottom + 1) continue;
         ctx.strokeStyle = pal.grid;
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -306,30 +369,126 @@ export default function CandleChart({
         ctx.fillText(fmtTimeLabel(cs[i].time, intra), x, L.bottom + TIME_H / 2 + 1);
       }
 
-      // candles (clipped to the plot)
-      const bodyW = Math.max(1, bw * 0.7);
       const drawFrom = Math.max(0, Math.floor(v.from) - 1);
       const drawTo = Math.min(cs.length - 1, Math.ceil(v.to) + 1);
+
+      // ── volume band (drawn first so price sits on top) ──
+      if (L.volH > 0 && cs.length > 0) {
+        let volMax = 0;
+        for (let i = Math.max(0, Math.floor(v.from)); i <= Math.min(cs.length - 1, Math.ceil(v.to)); i++) {
+          const vol = cs[i].volume;
+          if (typeof vol === "number" && vol > volMax) volMax = vol;
+        }
+        if (volMax > 0) {
+          const vbW = Math.max(1, bw * 0.7);
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(L.left, L.volTop, L.plotW, L.volH);
+          ctx.clip();
+          ctx.globalAlpha = 0.45;
+          for (let i = drawFrom; i <= drawTo; i++) {
+            const c = cs[i];
+            const vol = c.volume;
+            if (typeof vol !== "number" || vol <= 0) continue;
+            const cx = xForIndex(i + 0.5);
+            if (cx < L.left - bw || cx > L.right + bw) continue;
+            const barH = (vol / volMax) * L.volH;
+            ctx.fillStyle = c.close >= c.open ? pal.up : pal.down;
+            ctx.fillRect(cx - vbW / 2, L.volBottom - barH, vbW, Math.max(1, barH));
+          }
+          ctx.restore();
+        }
+      }
+
+      // ── price series: candles or area, clipped to the price region ──
+      const bodyW = Math.max(1, bw * 0.7);
       ctx.save();
       ctx.beginPath();
-      ctx.rect(L.left, L.top, L.plotW, L.plotH);
+      ctx.rect(L.left, L.priceTop, L.plotW, L.pricePlotH);
       ctx.clip();
-      for (let i = drawFrom; i <= drawTo; i++) {
-        const c = cs[i];
-        const cx = xForIndex(i + 0.5);
-        if (cx < L.left - bw || cx > L.right + bw) continue;
-        const up = c.close >= c.open;
-        const color = up ? pal.up : pal.down;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(Math.round(cx) + 0.5, yForPrice(c.high));
-        ctx.lineTo(Math.round(cx) + 0.5, yForPrice(c.low));
-        ctx.stroke();
-        const yTop = yForPrice(Math.max(c.open, c.close));
-        const yBot = yForPrice(Math.min(c.open, c.close));
-        ctx.fillStyle = color;
-        ctx.fillRect(cx - bodyW / 2, yTop, bodyW, Math.max(1, yBot - yTop));
+      if (chartTypeRef.current === "area") {
+        // direction over the visible range tints the area green/purple
+        const vf = cs[Math.max(0, Math.min(cs.length - 1, Math.floor(v.from < 0 ? 0 : v.from)))];
+        const vl = cs[Math.min(cs.length - 1, Math.max(0, Math.ceil(v.to) - 1))];
+        const rising = !!vf && !!vl && vl.close >= vf.close;
+        const lineCol = rising ? pal.up : pal.down;
+        const pts: Array<[number, number]> = [];
+        for (let i = drawFrom; i <= drawTo; i++) {
+          pts.push([xForIndex(i + 0.5), yForPrice(cs[i].close)]);
+        }
+        if (pts.length > 0) {
+          const grad = ctx.createLinearGradient(0, L.priceTop, 0, L.priceBottom);
+          const [gr, gg, gb] = (() => {
+            const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(lineCol);
+            return m
+              ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)]
+              : [120, 120, 120];
+          })();
+          grad.addColorStop(0, `rgba(${gr},${gg},${gb},0.32)`);
+          grad.addColorStop(1, `rgba(${gr},${gg},${gb},0.02)`);
+          ctx.beginPath();
+          ctx.moveTo(pts[0][0], pts[0][1]);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+          ctx.lineTo(pts[pts.length - 1][0], L.priceBottom);
+          ctx.lineTo(pts[0][0], L.priceBottom);
+          ctx.closePath();
+          ctx.fillStyle = grad;
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(pts[0][0], pts[0][1]);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+          ctx.strokeStyle = lineCol;
+          ctx.lineWidth = 1.5;
+          ctx.lineJoin = "round";
+          ctx.stroke();
+        }
+      } else {
+        for (let i = drawFrom; i <= drawTo; i++) {
+          const c = cs[i];
+          const cx = xForIndex(i + 0.5);
+          if (cx < L.left - bw || cx > L.right + bw) continue;
+          const up = c.close >= c.open;
+          const color = up ? pal.up : pal.down;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(Math.round(cx) + 0.5, yForPrice(c.high));
+          ctx.lineTo(Math.round(cx) + 0.5, yForPrice(c.low));
+          ctx.stroke();
+          const yTop = yForPrice(Math.max(c.open, c.close));
+          const yBot = yForPrice(Math.min(c.open, c.close));
+          ctx.fillStyle = color;
+          ctx.fillRect(cx - bodyW / 2, yTop, bodyW, Math.max(1, yBot - yTop));
+        }
+      }
+
+      // ── moving-average overlays (inside the same price clip) ──
+      const periods = masRef.current;
+      if (periods.length > 0) {
+        for (let mi = 0; mi < periods.length; mi++) {
+          const series = computeSMA(cs, periods[mi]);
+          ctx.strokeStyle = pal.ma[mi % pal.ma.length];
+          ctx.lineWidth = 1.5;
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          let started = false;
+          for (let i = drawFrom; i <= drawTo; i++) {
+            const val = series[i];
+            if (val == null) {
+              started = false;
+              continue;
+            }
+            const x = xForIndex(i + 0.5);
+            const y = yForPrice(val);
+            if (!started) {
+              ctx.moveTo(x, y);
+              started = true;
+            } else {
+              ctx.lineTo(x, y);
+            }
+          }
+          ctx.stroke();
+        }
       }
       ctx.restore();
 
@@ -337,7 +496,7 @@ export default function CandleChart({
       if (cs.length > 0) {
         const lastC = cs[cs.length - 1];
         const ly = yForPrice(lastC.close);
-        if (ly >= L.top && ly <= L.bottom) {
+        if (ly >= L.priceTop && ly <= L.priceBottom) {
           const col = lastC.close >= lastC.open ? pal.up : pal.down;
           ctx.save();
           ctx.strokeStyle = col;
@@ -359,6 +518,31 @@ export default function CandleChart({
         }
       }
 
+      // ── always-on moving-average legend (top-left, first row) ──
+      const maPeriods = masRef.current;
+      if (maPeriods.length > 0 && cs.length > 0) {
+        ctx.textAlign = "left";
+        let mlx = L.left + 4;
+        const mly = L.top + 9;
+        for (let mi = 0; mi < maPeriods.length; mi++) {
+          const series = computeSMA(cs, maPeriods[mi]);
+          let lastVal: number | null = null;
+          for (let i = series.length - 1; i >= 0; i--) {
+            if (series[i] != null) {
+              lastVal = series[i];
+              break;
+            }
+          }
+          const label = `MA${maPeriods[mi]}`;
+          const valText = lastVal != null ? ` ${fmtPrice(lastVal)}` : "";
+          ctx.fillStyle = pal.ma[mi % pal.ma.length];
+          ctx.fillText(label + valText, mlx, mly);
+          mlx += ctx.measureText(label + valText).width + 12;
+        }
+      }
+      // OHLC hover legend drops to a second row when the MA legend owns the first.
+      const ohlcRowY = maPeriods.length > 0 ? L.top + 25 : L.top + 9;
+
       // crosshair + hovered-candle OHLC legend
       if (crosshair.on && !drag.on) {
         const idx = Math.floor(indexForX(crosshair.x));
@@ -375,7 +559,7 @@ export default function CandleChart({
           ctx.lineTo(Math.round(snapX) + 0.5, L.bottom);
           ctx.stroke();
         }
-        if (crosshair.y >= L.top && crosshair.y <= L.bottom) {
+        if (crosshair.y >= L.priceTop && crosshair.y <= L.priceBottom) {
           ctx.beginPath();
           ctx.moveTo(L.left, Math.round(crosshair.y) + 0.5);
           ctx.lineTo(L.right, Math.round(crosshair.y) + 0.5);
@@ -383,7 +567,7 @@ export default function CandleChart({
         }
         ctx.restore();
 
-        if (crosshair.y >= L.top && crosshair.y <= L.bottom) {
+        if (crosshair.y >= L.priceTop && crosshair.y <= L.priceBottom) {
           const plabel = fmtPrice(priceForY(crosshair.y));
           const tw = ctx.measureText(plabel).width;
           ctx.fillStyle = pal.chipBg;
@@ -415,9 +599,12 @@ export default function CandleChart({
             ["L", fmtPrice(c.low)],
             ["C", fmtPrice(c.close)],
           ];
+          if (typeof c.volume === "number" && c.volume > 0) {
+            parts.push(["V", fmtVol(c.volume)]);
+          }
           ctx.textAlign = "left";
           let lx = L.left + 4;
-          const ly = L.top + 9;
+          const ly = ohlcRowY;
           for (const [k, val] of parts) {
             ctx.fillStyle = pal.legendLabel;
             ctx.fillText(k, lx, ly);
@@ -453,8 +640,13 @@ export default function CandleChart({
       schedule();
     };
 
+    const reset = () => {
+      fit();
+      schedule();
+    };
+
     // Expose the bits the data effect needs, then do the first layout.
-    apiRef.current = { schedule, fit };
+    apiRef.current = { schedule, fit, reset };
     if (candlesRef.current.length > 0 && rangeRef.current === null) fit();
     applySize();
 
@@ -561,12 +753,18 @@ export default function CandleChart({
       schedule();
     };
 
+    const onDblClick = (e: MouseEvent) => {
+      e.preventDefault();
+      reset();
+    };
+
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", endPointer);
     canvas.addEventListener("pointercancel", endPointer);
     canvas.addEventListener("pointerleave", onPointerLeave);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("dblclick", onDblClick);
 
     return () => {
       apiRef.current = null;
@@ -578,6 +776,7 @@ export default function CandleChart({
       canvas.removeEventListener("pointercancel", endPointer);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("dblclick", onDblClick);
       if (raf != null) cancelAnimationFrame(raf);
     };
   }, []);
@@ -586,6 +785,9 @@ export default function CandleChart({
   React.useEffect(() => {
     candlesRef.current = candles;
     intervalRef.current = interval;
+    chartTypeRef.current = chartType;
+    showVolumeRef.current = showVolume;
+    masRef.current = mas;
     // currency is part of the props contract but the renderer formats numbers
     // without a currency symbol; reference it so the dep stays honest.
     void currency;
@@ -607,11 +809,37 @@ export default function CandleChart({
     }
     prevLenRef.current = candles.length;
     api?.schedule();
-  }, [candles, interval, currency, range]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas]);
 
   return (
     <div ref={wrapRef} className={className}>
       <canvas ref={canvasRef} style={{ display: "block", touchAction: "none" }} />
+      <button
+        type="button"
+        onClick={() => apiRef.current?.reset()}
+        title="Reset zoom (or double-click the chart)"
+        aria-label="Reset zoom"
+        className="absolute bottom-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-card-border text-muted-foreground transition-colors hover:text-foreground"
+        style={{
+          background: "color-mix(in oklab, var(--card) 78%, transparent)",
+          backdropFilter: "blur(8px)",
+        }}
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8" />
+          <path d="M3 3v5h5" />
+        </svg>
+      </button>
     </div>
   );
 }

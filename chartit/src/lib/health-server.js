@@ -91,6 +91,7 @@ async function buildChartData(symbol, range) {
       high: num(p.high) ?? close,
       low: num(p.low) ?? close,
       close,
+      volume: num(p.volume),
     });
   }
   candles.sort((a, b) => a.time - b.time);

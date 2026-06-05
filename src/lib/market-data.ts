@@ -39,6 +39,7 @@ export interface Candle {
   high: number;
   low: number;
   close: number;
+  volume: number | null; // shares/contracts traded in the bar; null when unknown
 }
 
 export interface ChartData {
@@ -268,7 +269,7 @@ async function fetchNasdaqJson(path: string): Promise<{ status?: { rCode?: numbe
   return null;
 }
 
-interface NasdaqHistRow { date?: string; open?: string; high?: string; low?: string; close?: string }
+interface NasdaqHistRow { date?: string; open?: string; high?: string; low?: string; close?: string; volume?: string }
 interface NasdaqQuoteData {
   symbol?: string;
   companyName?: string;
@@ -326,6 +327,7 @@ async function getChartDataFromNasdaq(symbol: string, range: Range): Promise<Cha
       high: parseMoney(r?.high) ?? close,
       low: parseMoney(r?.low) ?? close,
       close,
+      volume: parseLargeNum(r?.volume),
     });
   }
   candles.sort((a, b) => a.time - b.time);
@@ -453,6 +455,7 @@ async function getChartDataFromYahoo(symbol: string, range: Range): Promise<Char
   const highs = q.high ?? [];
   const lows = q.low ?? [];
   const closes = q.close ?? [];
+  const volumes = q.volume ?? [];
 
   const candles: Candle[] = [];
   const seen = new Set<number>();
@@ -467,6 +470,7 @@ async function getChartDataFromYahoo(symbol: string, range: Range): Promise<Char
       high: num(highs[i]) ?? close,
       low: num(lows[i]) ?? close,
       close,
+      volume: num(volumes[i]),
     });
   }
   candles.sort((a, b) => a.time - b.time);

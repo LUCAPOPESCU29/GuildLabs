@@ -2,10 +2,21 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowUpRight, RefreshCw, CandlestickChart } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  ArrowUpRight,
+  RefreshCw,
+  CandlestickChart,
+  AreaChart,
+  BarChart3,
+  Search,
+} from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
-import CandleChart from "./_candle-chart";
+import CandleChart, { MA_COLORS, type ChartType } from "./_candle-chart";
+
+// Moving averages the page offers as toggleable overlays.
+const MA_OPTIONS = [20, 50] as const;
 
 // Purple + green chart theme, drawn from the FORGE design tokens so the page
 // shares the site's palette and tracks light/dark automatically: green
@@ -54,6 +65,7 @@ interface Candle {
   high: number;
   low: number;
   close: number;
+  volume?: number | null;
 }
 
 interface ChartData {
@@ -187,6 +199,7 @@ export default function LiveChart({
   symbol: string;
   initialRange: RangeKey;
 }) {
+  const router = useRouter();
   const [range, setRange] = React.useState<RangeKey>(initialRange);
   const [data, setData] = React.useState<ChartData | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -197,8 +210,31 @@ export default function LiveChart({
   // re-render the "updated Xs ago" label + candle-close countdown once per second
   const [tickNow, setTickNow] = React.useState(() => Date.now());
 
+  // ── Chart display controls ──
+  const [chartType, setChartType] = React.useState<ChartType>("candles");
+  const [showVolume, setShowVolume] = React.useState(true);
+  const [mas, setMas] = React.useState<number[]>([]); // active SMA periods, ascending
+  const [searchValue, setSearchValue] = React.useState("");
+
   const prevPriceRef = React.useRef<number | null>(null);
   const flashTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const toggleMa = React.useCallback((period: number) => {
+    setMas((prev) =>
+      prev.includes(period)
+        ? prev.filter((p) => p !== period)
+        : [...prev, period].sort((a, b) => a - b)
+    );
+  }, []);
+
+  const onSearch = React.useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const sym = searchValue.trim().toUpperCase();
+      if (sym) router.push(`/c/${encodeURIComponent(sym)}`);
+    },
+    [router, searchValue]
+  );
 
   // ── Fetch data on range change + on a refresh interval ─────────────────────
   const load = React.useCallback(
@@ -406,6 +442,94 @@ export default function LiveChart({
             </div>
           </div>
 
+          {/* ── Chart controls: type · volume · MAs · search ──────────────── */}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Candles ↔ Area */}
+              <div className="inline-flex rounded-full border border-card-border bg-card p-1">
+                {([
+                  ["candles", "Candles", CandlestickChart],
+                  ["area", "Area", AreaChart],
+                ] as const).map(([key, label, Icon]) => {
+                  const active = chartType === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setChartType(key)}
+                      className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                      style={
+                        active
+                          ? { background: UP, color: "#000" }
+                          : { color: "var(--muted-foreground)" }
+                      }
+                      aria-pressed={active}
+                    >
+                      <Icon className="size-3.5" />
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Volume toggle */}
+              <button
+                onClick={() => setShowVolume((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                style={
+                  showVolume
+                    ? { background: UP, color: "#000", borderColor: "transparent" }
+                    : { background: "var(--card)", color: "var(--muted-foreground)" }
+                }
+                aria-pressed={showVolume}
+              >
+                <BarChart3 className="size-3.5" />
+                Vol
+              </button>
+
+              {/* Moving-average pills */}
+              {MA_OPTIONS.map((p) => {
+                const active = mas.includes(p);
+                const color = MA_COLORS[mas.indexOf(p) % MA_COLORS.length];
+                return (
+                  <button
+                    key={p}
+                    onClick={() => toggleMa(p)}
+                    className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                    style={
+                      active
+                        ? { background: color, color: "#000", borderColor: "transparent" }
+                        : {
+                            background: "var(--card)",
+                            color: "var(--muted-foreground)",
+                            borderColor: "var(--card-border)",
+                          }
+                    }
+                    aria-pressed={active}
+                  >
+                    MA{p}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Ticker search */}
+            <form
+              onSubmit={onSearch}
+              className="inline-flex items-center gap-2 rounded-full border border-card-border bg-card px-3 py-1.5"
+            >
+              <Search className="size-3.5 text-muted-foreground" />
+              <input
+                value={searchValue}
+                onChange={(e) => setSearchValue(e.target.value)}
+                placeholder="Search ticker…"
+                aria-label="Search ticker"
+                spellCheck={false}
+                autoCapitalize="characters"
+                className="w-28 bg-transparent font-mono text-xs uppercase tracking-wider text-foreground placeholder:text-muted-foreground/60 placeholder:normal-case focus:outline-none"
+              />
+            </form>
+          </div>
+
           {/* ── Chart card ────────────────────────────────────────────────── */}
           <div
             className="relative mt-4 overflow-hidden rounded-3xl border border-card-border bg-card p-3 sm:p-4"
@@ -420,6 +544,9 @@ export default function LiveChart({
                   interval={data.interval}
                   currency={data.currency}
                   range={data.range}
+                  chartType={chartType}
+                  showVolume={showVolume}
+                  mas={mas}
                   className="absolute inset-0"
                 />
               )}
