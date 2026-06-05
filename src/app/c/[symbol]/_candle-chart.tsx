@@ -633,6 +633,11 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     let drawings: Drawing[] = [];
     let pending: { type: "trend" | "fib"; points: Array<{ t: number; p: number }> } | null = null;
     const pendingCursor = { x: 0, y: 0 };
+    // selection + endpoint/body editing (cursor tool)
+    let selectedId: string | null = null;
+    let editDrag:
+      | { id: string; handle: number | "body"; startX: number; startY: number; origin: Array<{ t: number; p: number }> }
+      | null = null;
     // last price mapping, refreshed each draw so pointer handlers can invert it
     const mapState = { priceTop: 0, pricePlotH: 1, lo: 0, hi: 1, useLog: false, logHi: 0, logSpan: 1 };
     const drawKey = () => `chartit:drawings:${(symbolRef.current ?? "").toUpperCase()}`;
@@ -716,6 +721,19 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             if (Math.abs(y - priceToY(hiP - (hiP - loP) * lv)) <= tol) return d.id;
           }
         }
+      }
+      return null;
+    };
+    // screen position of a drawing's editable handle #i
+    const handlePos = (d: Drawing, i: number): { x: number; y: number } => {
+      if (d.type === "hline") return { x: layout().right - 8, y: priceToY(d.points[0].p) };
+      return { x: timeToXc(d.points[i].t), y: priceToY(d.points[i].p) };
+    };
+    // which handle of a drawing is under (x,y), or null
+    const handleAt = (d: Drawing, x: number, y: number): number | null => {
+      for (let i = 0; i < d.points.length; i++) {
+        const h = handlePos(d, i);
+        if (Math.hypot(x - h.x, y - h.y) <= 7) return i;
       }
       return null;
     };
@@ -1411,8 +1429,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         ctx.lineJoin = "round";
         ctx.setLineDash([]);
         for (const d of drawings) {
+          const sel = d.id === selectedId;
           ctx.strokeStyle = pal.chipBg;
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = sel ? 2.5 : 1.5;
           if (d.type === "hline") {
             const y = priceToY(d.points[0].p);
             ctx.beginPath();
@@ -1446,6 +1465,19 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
               ctx.fillStyle = pal.legendLabel;
               ctx.textAlign = "left";
               ctx.fillText(`${(lv * 100).toFixed(1)}%  ${fmtPrice(p)}`, xa + 4, y - 5);
+            }
+          }
+          // selection handles
+          if (sel) {
+            ctx.fillStyle = pal.chipBg;
+            ctx.strokeStyle = pal.onColorText;
+            ctx.lineWidth = 1;
+            for (let i = 0; i < d.points.length; i++) {
+              const h = handlePos(d, i);
+              ctx.beginPath();
+              ctx.rect(h.x - 3.5, h.y - 3.5, 7, 7);
+              ctx.fill();
+              ctx.stroke();
             }
           }
         }
@@ -1927,6 +1959,38 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         return;
       }
 
+      // Cursor tool: select / drag existing drawings before falling back to pan.
+      if (dt === "cursor" && pointers.size === 1 && !e.shiftKey) {
+        // dragging a handle of the already-selected drawing?
+        if (selectedId) {
+          const sd = drawings.find((d) => d.id === selectedId);
+          if (sd) {
+            const h = handleAt(sd, px, py);
+            if (h != null) {
+              editDrag = { id: sd.id, handle: h, startX: px, startY: py, origin: sd.points.map((q) => ({ ...q })) };
+              drag.on = false;
+              crosshair.on = false;
+              schedule();
+              return;
+            }
+          }
+        }
+        const hit = hitTestDrawing(px, py);
+        if (hit) {
+          selectedId = hit;
+          const sd = drawings.find((d) => d.id === hit)!;
+          editDrag = { id: hit, handle: "body", startX: px, startY: py, origin: sd.points.map((q) => ({ ...q })) };
+          drag.on = false;
+          crosshair.on = false;
+          schedule();
+          return;
+        }
+        if (selectedId) {
+          selectedId = null; // clicked empty space — deselect
+          schedule();
+        }
+      }
+
       if (pointers.size === 1) {
         if (e.shiftKey) {
           // Shift-drag = measure, not pan.
@@ -1974,6 +2038,24 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         return;
       }
 
+      if (editDrag) {
+        const d = drawings.find((dd) => dd.id === editDrag!.id);
+        if (d) {
+          if (editDrag.handle === "body") {
+            const dx = x - editDrag.startX;
+            const dy = y - editDrag.startY;
+            d.points = editDrag.origin.map((pt) => ({
+              t: xToTime(timeToXc(pt.t) + dx),
+              p: yToPrice(priceToY(pt.p) + dy),
+            }));
+          } else {
+            d.points[editDrag.handle] = { t: xToTime(x), p: yToPrice(y) };
+          }
+        }
+        schedule();
+        return;
+      }
+
       if (pending) {
         pendingCursor.x = x;
         pendingCursor.y = y;
@@ -2010,6 +2092,11 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       if (pointers.size < 2) pinchDist = null;
       if (pointers.size === 0) {
         drag.on = false;
+        if (editDrag) {
+          editDrag = null;
+          saveDrawings();
+          schedule();
+        }
         if (measure.on) {
           measure.on = false;
           schedule(); // clear the overlay
@@ -2104,9 +2191,22 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           onFsRef.current?.();
           e.preventDefault();
           break;
+        case "Delete":
+        case "Backspace":
+          if (selectedId) {
+            drawings = drawings.filter((d) => d.id !== selectedId);
+            selectedId = null;
+            saveDrawings();
+            schedule();
+            e.preventDefault();
+          }
+          break;
         case "Escape":
           if (pending) {
             pending = null;
+            schedule();
+          } else if (selectedId) {
+            selectedId = null;
             schedule();
           } else if (typeof document !== "undefined" && document.fullscreenElement) {
             document.exitFullscreen?.();
