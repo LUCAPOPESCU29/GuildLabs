@@ -78,7 +78,9 @@ function genDrawId(): string {
   _drawSeq += 1;
   return `d${Date.now().toString(36)}${_drawSeq}`;
 }
-const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 1];
+const FIB_RETR = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+const FIB_EXT = [1.272, 1.618, 2.0, 2.618];
+const FIB_ALL = [...FIB_RETR, ...FIB_EXT];
 
 interface View {
   from: number; // left-most visible bar index (fractional, may be < 0)
@@ -715,10 +717,10 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           const y2 = priceToY(d.points[1].p);
           if (distToSeg(x, y, x1, y1, x2, y2) <= tol) return d.id;
         } else if (d.type === "fib" && d.points.length === 2) {
-          const hiP = Math.max(d.points[0].p, d.points[1].p);
-          const loP = Math.min(d.points[0].p, d.points[1].p);
-          for (const lv of FIB_LEVELS) {
-            if (Math.abs(y - priceToY(hiP - (hiP - loP) * lv)) <= tol) return d.id;
+          const p1 = d.points[0].p;
+          const p2 = d.points[1].p;
+          for (const lv of FIB_ALL) {
+            if (Math.abs(y - priceToY(p1 + (p2 - p1) * lv)) <= tol) return d.id;
           }
         }
       }
@@ -736,6 +738,34 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         if (Math.hypot(x - h.x, y - h.y) <= 7) return i;
       }
       return null;
+    };
+    // Snap a click to a nearby swing pivot (±2-bar extreme within ~1.5 bars), so
+    // hand-drawn fibs/trends land on real highs/lows. Falls back to the raw click.
+    const snapPoint = (px: number, py: number): { t: number; p: number } => {
+      const cs = candlesRef.current;
+      const raw = { t: xToTime(px), p: yToPrice(py) };
+      if (cs.length < 5) return raw;
+      const fIdx = indexForX(px);
+      let best: { t: number; p: number } | null = null;
+      let bestDy = Infinity;
+      for (let i = Math.max(2, Math.round(fIdx) - 2); i <= Math.min(cs.length - 3, Math.round(fIdx) + 2); i++) {
+        if (Math.abs(i - fIdx) > 1.5) continue;
+        const isHigh =
+          cs[i].high >= cs[i - 1].high && cs[i].high >= cs[i - 2].high &&
+          cs[i].high >= cs[i + 1].high && cs[i].high >= cs[i + 2].high;
+        const isLow =
+          cs[i].low <= cs[i - 1].low && cs[i].low <= cs[i - 2].low &&
+          cs[i].low <= cs[i + 1].low && cs[i].low <= cs[i + 2].low;
+        if (isHigh) {
+          const dy = Math.abs(priceToY(cs[i].high) - py);
+          if (dy < bestDy) { bestDy = dy; best = { t: cs[i].time, p: cs[i].high }; }
+        }
+        if (isLow) {
+          const dy = Math.abs(priceToY(cs[i].low) - py);
+          if (dy < bestDy) { bestDy = dy; best = { t: cs[i].time, p: cs[i].low }; }
+        }
+      }
+      return best && bestDy < 30 ? best : raw;
     };
 
     const priceRange = () => {
@@ -1449,22 +1479,50 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           } else if (d.type === "fib" && d.points.length === 2) {
             const x1 = timeToXc(d.points[0].t);
             const x2 = timeToXc(d.points[1].t);
+            const p1 = d.points[0].p;
+            const p2 = d.points[1].p;
             const xa = Math.min(x1, x2);
-            const xb = Math.max(x1, x2);
-            const hiP = Math.max(d.points[0].p, d.points[1].p);
-            const loP = Math.min(d.points[0].p, d.points[1].p);
-            for (const lv of FIB_LEVELS) {
-              const p = hiP - (hiP - loP) * lv;
-              const y = priceToY(p);
-              ctx.globalAlpha = 0.65;
+            const priceAt = (v: number) => p1 + (p2 - p1) * v;
+            const fibPx = Math.abs(priceToY(p1) - priceToY(p2));
+            const showLabels = fibPx > 60; // skip labels when too compressed
+            // golden pocket (0.382–0.618) shaded across the forward span
+            const gpA = priceToY(priceAt(0.382));
+            const gpB = priceToY(priceAt(0.618));
+            ctx.fillStyle = toRgba(pal.chipBg, 0.08);
+            ctx.fillRect(xa, Math.min(gpA, gpB), L.right - xa, Math.abs(gpB - gpA));
+            // anchor segment (the move itself)
+            ctx.strokeStyle = pal.chipBg;
+            ctx.lineWidth = sel ? 2.5 : 1.5;
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(x1, priceToY(p1));
+            ctx.lineTo(x2, priceToY(p2));
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            // levels (retracements solid-ish, extensions fainter), extend to right edge
+            for (const v of FIB_ALL) {
+              const price = priceAt(v);
+              const y = priceToY(price);
+              const isExt = v > 1;
+              ctx.strokeStyle = pal.chipBg;
+              ctx.lineWidth = 1;
+              ctx.globalAlpha = isExt ? 0.4 : 0.7;
               ctx.beginPath();
               ctx.moveTo(xa, Math.round(y) + 0.5);
-              ctx.lineTo(xb, Math.round(y) + 0.5);
+              ctx.lineTo(L.right, Math.round(y) + 0.5);
               ctx.stroke();
               ctx.globalAlpha = 1;
-              ctx.fillStyle = pal.legendLabel;
-              ctx.textAlign = "left";
-              ctx.fillText(`${(lv * 100).toFixed(1)}%  ${fmtPrice(p)}`, xa + 4, y - 5);
+              if (showLabels) {
+                const dpct = p1 ? (price / p1 - 1) * 100 : 0;
+                ctx.fillStyle = pal.legendLabel;
+                ctx.textAlign = "right";
+                ctx.fillText(
+                  `${(v * 100).toFixed(1)}%  ${fmtPrice(price)}  ${dpct >= 0 ? "+" : ""}${dpct.toFixed(2)}%`,
+                  L.right - 2,
+                  y - 5
+                );
+                ctx.textAlign = "left";
+              }
             }
           }
           // selection handles
@@ -1936,21 +1994,20 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           schedule();
           return;
         }
-        const price = yToPrice(py);
-        const time = xToTime(px);
         if (dt === "hline") {
-          drawings.push({ id: genDrawId(), type: "hline", points: [{ t: time, p: price }] });
+          drawings.push({ id: genDrawId(), type: "hline", points: [{ t: xToTime(px), p: yToPrice(py) }] });
           saveDrawings();
           schedule();
           return;
         }
-        // trend / fib: two clicks
+        // trend / fib: two clicks, snapped to nearby pivots
+        const snapped = snapPoint(px, py);
         if (!pending) {
-          pending = { type: dt, points: [{ t: time, p: price }] };
+          pending = { type: dt, points: [snapped] };
           pendingCursor.x = px;
           pendingCursor.y = py;
         } else {
-          pending.points.push({ t: time, p: price });
+          pending.points.push(snapped);
           drawings.push({ id: genDrawId(), type: pending.type, points: pending.points });
           pending = null;
           saveDrawings();
@@ -2191,6 +2248,36 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           onFsRef.current?.();
           e.preventDefault();
           break;
+        case "a":
+        case "A": {
+          // Auto-Fib over the visible swing (high bar ↔ low bar, time-ordered).
+          const cs = candlesRef.current;
+          if (cs.length > 1) {
+            const lo = Math.max(0, Math.floor(viewRef.current.from));
+            const hi = Math.min(cs.length - 1, Math.ceil(viewRef.current.to));
+            let hiI = lo;
+            let loI = lo;
+            for (let i = lo; i <= hi; i++) {
+              if (cs[i].high > cs[hiI].high) hiI = i;
+              if (cs[i].low < cs[loI].low) loI = i;
+            }
+            const firstI = Math.min(hiI, loI);
+            const secondI = Math.max(hiI, loI);
+            const pAt = (idx: number) => (idx === hiI ? cs[idx].high : cs[idx].low);
+            drawings.push({
+              id: genDrawId(),
+              type: "fib",
+              points: [
+                { t: cs[firstI].time, p: pAt(firstI) },
+                { t: cs[secondI].time, p: pAt(secondI) },
+              ],
+            });
+            saveDrawings();
+            schedule();
+          }
+          e.preventDefault();
+          break;
+        }
         case "Delete":
         case "Backspace":
           if (selectedId) {
