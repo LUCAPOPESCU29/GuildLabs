@@ -108,18 +108,31 @@ export async function quotes(symbols) {
   return out;
 }
 
-export async function history(symbol, cfg) {
-  const period2 = Math.floor(Date.now() / 1000);
-  const start = cfg.ytd
-    ? new Date(new Date().getFullYear(), 0, 1)
-    : new Date(Date.now() - cfg.days * 86_400_000);
-  const period1 = Math.floor(start.getTime() / 1000);
+// Intraday granularities (minutes/hours). Yahoo silently truncates these when
+// queried with period1/period2 — it only returns the full intraday series for a
+// `range` query (e.g. range=1d&interval=5m). Daily/weekly intervals are fine
+// with period1/period2, which let us request an exact lookback window.
+const INTRADAY = /[mh]$/;
 
-  const result = await fetchChart(symbol, {
-    period1: String(period1),
-    period2: String(period2),
-    interval: cfg.interval,
-  });
+export async function history(symbol, cfg, range) {
+  let params;
+  if (INTRADAY.test(cfg.interval) && range) {
+    // range here is a RANGES key ("1d", "5d") — also a valid Yahoo range value.
+    params = { range, interval: cfg.interval };
+  } else {
+    const period2 = Math.floor(Date.now() / 1000);
+    const start = cfg.ytd
+      ? new Date(new Date().getFullYear(), 0, 1)
+      : new Date(Date.now() - cfg.days * 86_400_000);
+    const period1 = Math.floor(start.getTime() / 1000);
+    params = {
+      period1: String(period1),
+      period2: String(period2),
+      interval: cfg.interval,
+    };
+  }
+
+  const result = await fetchChart(symbol, params);
 
   const ts = Array.isArray(result.timestamp) ? result.timestamp : [];
   const q = result.indicators?.quote?.[0] ?? {};
