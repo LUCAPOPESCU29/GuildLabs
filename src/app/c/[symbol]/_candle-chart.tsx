@@ -109,6 +109,9 @@ interface CandleChartProps {
   chartType?: ChartType;
   showVolume?: boolean;
   mas?: number[]; // SMA periods to overlay, e.g. [20, 50]; empty = none
+  emas?: number[]; // EMA periods to overlay (dashed)
+  ribbon?: boolean; // EMA ribbon (8/13/21/34/55)
+  crosses?: boolean; // golden/death cross markers (EMA 50 vs 200)
   priceScale?: PriceScale;
   indicators?: Indicator[]; // stacked oscillator sub-panels below the chart
   bollinger?: boolean; // Bollinger Bands (20, 2σ) overlay on the price series
@@ -438,6 +441,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     chartType = "candles",
     showVolume = true,
     mas = [],
+    emas = [],
+    ribbon = false,
+    crosses = false,
     priceScale = "linear",
     indicators = [],
     bollinger = false,
@@ -473,6 +479,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const chartTypeRef = React.useRef<ChartType>(chartType);
   const showVolumeRef = React.useRef(showVolume);
   const masRef = React.useRef<number[]>(mas);
+  const emasRef = React.useRef<number[]>(emas);
+  const ribbonRef = React.useRef<boolean>(ribbon);
+  const crossesRef = React.useRef<boolean>(crosses);
   const priceScaleRef = React.useRef<PriceScale>(priceScale);
   const indicatorsRef = React.useRef<Indicator[]>(indicators);
   const bollingerRef = React.useRef<boolean>(bollinger);
@@ -1513,6 +1522,62 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         ctx.setLineDash([]);
       }
 
+      // ── EMA ribbon (8/13/21/34/55), drawn behind the MA/EMA lines ──
+      if (ribbonRef.current) {
+        const rp = [8, 13, 21, 34, 55];
+        const cl = cs.map((c) => c.close);
+        const series = rp.map((p) => computeEMA(cl, p));
+        for (let s = 0; s < series.length - 1; s++) {
+          const a = series[s];
+          const b = series[s + 1];
+          ctx.beginPath();
+          let started = false;
+          for (let i = drawFrom; i <= drawTo; i++) {
+            const av = a[i];
+            if (av == null) continue;
+            const x = xForIndex(i + 0.5);
+            const y = yForPrice(av);
+            if (!started) {
+              ctx.moveTo(x, y);
+              started = true;
+            } else ctx.lineTo(x, y);
+          }
+          for (let i = drawTo; i >= drawFrom; i--) {
+            const bv = b[i];
+            if (bv == null) continue;
+            ctx.lineTo(xForIndex(i + 0.5), yForPrice(bv));
+          }
+          if (started) {
+            ctx.closePath();
+            const fast = a[drawTo] ?? a[a.length - 1] ?? 0;
+            const slow = b[drawTo] ?? b[b.length - 1] ?? 0;
+            ctx.fillStyle = toRgba((fast ?? 0) >= (slow ?? 0) ? pal.up : pal.down, 0.06);
+            ctx.fill();
+          }
+        }
+        for (const s of series) {
+          ctx.strokeStyle = toRgba(pal.chipBg, 0.5);
+          ctx.lineWidth = 1;
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          let st = false;
+          for (let i = drawFrom; i <= drawTo; i++) {
+            const val = s[i];
+            if (val == null) {
+              st = false;
+              continue;
+            }
+            const x = xForIndex(i + 0.5);
+            const y = yForPrice(val);
+            if (!st) {
+              ctx.moveTo(x, y);
+              st = true;
+            } else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+      }
+
       // ── moving-average overlays (inside the same price clip) ──
       const periods = masRef.current;
       if (periods.length > 0) {
@@ -1540,6 +1605,36 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           }
           ctx.stroke();
         }
+      }
+
+      // ── EMA overlays (dashed, distinct from the solid SMAs) ──
+      const emaPeriods = emasRef.current;
+      if (emaPeriods.length > 0) {
+        const cl = cs.map((c) => c.close);
+        ctx.setLineDash([6, 3]);
+        for (let mi = 0; mi < emaPeriods.length; mi++) {
+          const series = computeEMA(cl, emaPeriods[mi]);
+          ctx.strokeStyle = pal.ma[mi % pal.ma.length];
+          ctx.lineWidth = 1.5;
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          let started = false;
+          for (let i = drawFrom; i <= drawTo; i++) {
+            const val = series[i];
+            if (val == null) {
+              started = false;
+              continue;
+            }
+            const x = xForIndex(i + 0.5);
+            const y = yForPrice(val);
+            if (!started) {
+              ctx.moveTo(x, y);
+              started = true;
+            } else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
       }
 
       // ── session VWAP overlay (dashed) ──
@@ -1801,6 +1896,51 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         }
       }
 
+      // ── golden / death cross markers (EMA 50 vs 200) ──
+      if (crossesRef.current && cs.length > 2) {
+        const cl = cs.map((c) => c.close);
+        const e50 = computeEMA(cl, 50);
+        const e200 = computeEMA(cl, 200);
+        const a = Math.max(1, Math.floor(v.from));
+        const b = Math.min(cs.length - 1, Math.ceil(v.to));
+        for (let i = a; i <= b; i++) {
+          const p0 = e50[i - 1];
+          const q0 = e200[i - 1];
+          const p1 = e50[i];
+          const q1 = e200[i];
+          if (p0 == null || q0 == null || p1 == null || q1 == null) continue;
+          const golden = p0 <= q0 && p1 > q1;
+          const death = p0 >= q0 && p1 < q1;
+          if (!golden && !death) continue;
+          const x = xForIndex(i + 0.5);
+          const y = yForPrice(p1);
+          if (x < L.left || x > L.right) continue;
+          const r = 7;
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.fillStyle = golden ? pal.up : pal.down;
+          ctx.globalAlpha = 0.9;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = pal.onColorText;
+          ctx.textAlign = "center";
+          ctx.font = "bold 10px ui-monospace, monospace";
+          ctx.fillText(golden ? "G" : "D", x, y + 0.5);
+          ctx.font = FONT;
+          if (crosshair.on && Math.abs(crosshair.x - x) <= r + 2) {
+            const txt = golden ? "Golden cross (50/200)" : "Death cross (50/200)";
+            const tw = ctx.measureText(txt).width;
+            const bx = Math.max(L.left, Math.min(x - tw / 2 - 6, L.right - tw - 12));
+            roundRect(ctx, bx, y - r - 22, tw + 12, 18, 5);
+            ctx.fillStyle = pal.chipBg;
+            ctx.fill();
+            ctx.fillStyle = pal.chipText;
+            ctx.textAlign = "left";
+            ctx.fillText(txt, bx + 6, y - r - 13);
+          }
+        }
+      }
+
       // ── visible-range high / low annotations ──
       if (cs.length > 0) {
         let hiV = -Infinity;
@@ -1835,26 +1975,39 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
 
       // ── always-on overlay legend (top-left, first row): MAs + Bollinger + compare ──
       const maPeriods = masRef.current;
+      const emaPeriodsL = emasRef.current;
       const hasOverlayLegend =
-        maPeriods.length > 0 || bollingerRef.current || !!compareRef.current || vwapRef.current;
+        maPeriods.length > 0 ||
+        emaPeriodsL.length > 0 ||
+        bollingerRef.current ||
+        !!compareRef.current ||
+        vwapRef.current;
       if (hasOverlayLegend && cs.length > 0) {
         ctx.textAlign = "left";
         let mlx = L.left + 4;
         const mly = L.top + 9;
+        const lastOf = (series: Array<number | null>) => {
+          for (let i = series.length - 1; i >= 0; i--) if (series[i] != null) return series[i];
+          return null;
+        };
         for (let mi = 0; mi < maPeriods.length; mi++) {
-          const series = computeSMA(cs, maPeriods[mi]);
-          let lastVal: number | null = null;
-          for (let i = series.length - 1; i >= 0; i--) {
-            if (series[i] != null) {
-              lastVal = series[i];
-              break;
-            }
-          }
+          const lastVal = lastOf(computeSMA(cs, maPeriods[mi]));
           const label = `MA${maPeriods[mi]}`;
           const valText = lastVal != null ? ` ${fmtPrice(lastVal)}` : "";
           ctx.fillStyle = pal.ma[mi % pal.ma.length];
           ctx.fillText(label + valText, mlx, mly);
           mlx += ctx.measureText(label + valText).width + 12;
+        }
+        if (emaPeriodsL.length > 0) {
+          const cl = cs.map((c) => c.close);
+          for (let mi = 0; mi < emaPeriodsL.length; mi++) {
+            const lastVal = lastOf(computeEMA(cl, emaPeriodsL[mi]));
+            const label = `EMA${emaPeriodsL[mi]}`;
+            const valText = lastVal != null ? ` ${fmtPrice(lastVal)}` : "";
+            ctx.fillStyle = pal.ma[mi % pal.ma.length];
+            ctx.fillText(label + valText, mlx, mly);
+            mlx += ctx.measureText(label + valText).width + 12;
+          }
         }
         if (bollingerRef.current) {
           const bb2 = computeBollinger(cs, 20, 2);
@@ -2573,6 +2726,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     chartTypeRef.current = chartType;
     showVolumeRef.current = showVolume;
     masRef.current = mas;
+    emasRef.current = emas;
+    ribbonRef.current = ribbon;
+    crossesRef.current = crosses;
     priceScaleRef.current = priceScale;
     indicatorsRef.current = indicators;
     bollingerRef.current = bollinger;
@@ -2611,7 +2767,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     }
     prevLenRef.current = candles.length;
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, priceScale, indicators, bollinger, symbol, compare, events, vwap, volumeProfile, onToggleFullscreen, displayStartTime]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, emas, ribbon, crosses, priceScale, indicators, bollinger, symbol, compare, events, vwap, volumeProfile, onToggleFullscreen, displayStartTime]);
 
   return (
     <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>

@@ -28,6 +28,7 @@ import CandleChart, {
 
 // Moving averages the page offers as toggleable overlays.
 const MA_OPTIONS = [20, 50] as const;
+const EMA_OPTIONS = [9, 21, 50, 200] as const;
 
 // Price-axis scale options shown in the segmented control.
 const SCALE_OPTIONS: ReadonlyArray<{ key: PriceScale; label: string }> = [
@@ -112,6 +113,9 @@ interface ChartPrefs {
   bb: boolean;
   vwap: boolean;
   vp: boolean;
+  ema: number[];
+  rib: boolean;
+  cr: boolean;
 }
 
 const isChartType = (v: unknown): v is ChartType =>
@@ -136,6 +140,11 @@ const sanitizeMas = (arr: unknown): number[] | undefined => {
   );
   return out;
 };
+const sanitizeEmas = (arr: unknown): number[] | undefined => {
+  if (!Array.isArray(arr)) return undefined;
+  const allowed = EMA_OPTIONS as readonly number[];
+  return [...new Set(arr.map(Number).filter((n) => allowed.includes(n)))].sort((a, b) => a - b);
+};
 
 // localStorage prefs (validated). Empty when unavailable/corrupt.
 function readStoredPrefs(): Partial<ChartPrefs> {
@@ -153,6 +162,10 @@ function readStoredPrefs(): Partial<ChartPrefs> {
     if (typeof p.bb === "boolean") out.bb = p.bb;
     if (typeof p.vwap === "boolean") out.vwap = p.vwap;
     if (typeof p.vp === "boolean") out.vp = p.vp;
+    const ema = sanitizeEmas(p.ema);
+    if (ema) out.ema = ema;
+    if (typeof p.rib === "boolean") out.rib = p.rib;
+    if (typeof p.cr === "boolean") out.cr = p.cr;
     const ma = sanitizeMas(p.ma);
     if (ma) out.ma = ma;
     return out;
@@ -183,6 +196,15 @@ function readUrlPrefs(): Partial<ChartPrefs> {
   if (vwap === "0" || vwap === "1") out.vwap = vwap === "1";
   const vp = q.get("vp");
   if (vp === "0" || vp === "1") out.vp = vp === "1";
+  const emaRaw = q.get("ema");
+  if (emaRaw != null) {
+    const ema = sanitizeEmas(emaRaw.split(",").map((s) => Number(s.trim())));
+    if (ema) out.ema = ema;
+  }
+  const rib = q.get("rib");
+  if (rib === "0" || rib === "1") out.rib = rib === "1";
+  const cr = q.get("cr");
+  if (cr === "0" || cr === "1") out.cr = cr === "1";
   const ma = q.get("ma");
   if (ma != null) {
     const parsed = sanitizeMas(ma.split(",").map((s) => Number(s.trim())));
@@ -386,6 +408,9 @@ export default function LiveChart({
   const [bollinger, setBollinger] = React.useState(false);
   const [vwap, setVwap] = React.useState(false);
   const [volumeProfile, setVolumeProfile] = React.useState(false);
+  const [emas, setEmas] = React.useState<number[]>([]);
+  const [ribbon, setRibbon] = React.useState(false);
+  const [crosses, setCrosses] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
   const [compareSymbol, setCompareSymbol] = React.useState<string | null>(null);
   const [compareData, setCompareData] = React.useState<{ symbol: string; candles: Candle[] } | null>(null);
@@ -424,6 +449,12 @@ export default function LiveChart({
       prev.includes(period)
         ? prev.filter((p) => p !== period)
         : [...prev, period].sort((a, b) => a - b)
+    );
+  }, []);
+
+  const toggleEma = React.useCallback((period: number) => {
+    setEmas((prev) =>
+      prev.includes(period) ? prev.filter((p) => p !== period) : [...prev, period].sort((a, b) => a - b)
     );
   }, []);
 
@@ -545,6 +576,9 @@ export default function LiveChart({
     if (p.bb != null) setBollinger(p.bb);
     if (p.vwap != null) setVwap(p.vwap);
     if (p.vp != null) setVolumeProfile(p.vp);
+    if (p.ema != null) setEmas(p.ema);
+    if (p.rib != null) setRibbon(p.rib);
+    if (p.cr != null) setCrosses(p.cr);
     // compare ticker rides the URL only (not localStorage)
     const cmp = new URLSearchParams(window.location.search).get("cmp");
     if (cmp) setCompareSymbol(cmp.toUpperCase());
@@ -564,12 +598,15 @@ export default function LiveChart({
         bb: bollinger,
         vwap,
         vp: volumeProfile,
+        ema: emas,
+        rib: ribbon,
+        cr: crosses,
       };
       window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     } catch {
       // storage full / disabled — non-fatal
     }
-  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile]);
+  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses]);
 
   // Build a shareable deep link encoding the current view, copy to clipboard.
   const onShare = React.useCallback(() => {
@@ -584,6 +621,9 @@ export default function LiveChart({
     if (bollinger) params.set("bb", "1");
     if (vwap) params.set("vwap", "1");
     if (volumeProfile) params.set("vp", "1");
+    if (emas.length) params.set("ema", emas.join(","));
+    if (ribbon) params.set("rib", "1");
+    if (crosses) params.set("cr", "1");
     if (compareSymbol) params.set("cmp", compareSymbol);
     const url = `${window.location.origin}/c/${encodeURIComponent(symbol)}?${params}`;
     const done = () => {
@@ -592,7 +632,7 @@ export default function LiveChart({
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     };
     navigator.clipboard?.writeText(url).then(done).catch(done);
-  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, compareSymbol, symbol]);
+  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, compareSymbol, symbol]);
 
   // ── Price flash on tick ────────────────────────────────────────────────────
   // The CandleChart owns all rendering; here we only watch the price for the
@@ -830,6 +870,57 @@ export default function LiveChart({
                 );
               })}
 
+              {/* EMA pills (dashed overlays) */}
+              {EMA_OPTIONS.map((p) => {
+                const active = emas.includes(p);
+                const color = MA_COLORS[emas.indexOf(p) % MA_COLORS.length];
+                return (
+                  <button
+                    key={`ema${p}`}
+                    onClick={() => toggleEma(p)}
+                    className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                    style={
+                      active
+                        ? { background: color, color: "#000", borderColor: "transparent" }
+                        : {
+                            background: "var(--card)",
+                            color: "var(--muted-foreground)",
+                            borderColor: "var(--card-border)",
+                          }
+                    }
+                    aria-pressed={active}
+                    title={`EMA ${p}`}
+                  >
+                    E{p}
+                  </button>
+                );
+              })}
+
+              {/* EMA ribbon + golden/death cross toggles */}
+              {([
+                ["Ribbon", ribbon, () => setRibbon((s) => !s), "EMA ribbon (8/13/21/34/55)"],
+                ["X-up", crosses, () => setCrosses((s) => !s), "Golden / death cross markers (EMA 50/200)"],
+              ] as const).map(([label, active, onClick, title]) => (
+                <button
+                  key={label}
+                  onClick={onClick}
+                  className="rounded-full border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                  style={
+                    active
+                      ? { background: UP, color: "#000", borderColor: "transparent" }
+                      : {
+                          background: "var(--card)",
+                          color: "var(--muted-foreground)",
+                          borderColor: "var(--card-border)",
+                        }
+                  }
+                  aria-pressed={active}
+                  title={title}
+                >
+                  {label}
+                </button>
+              ))}
+
               {/* Price scale: linear / log / % */}
               <div className="inline-flex rounded-full border border-card-border bg-card p-1">
                 {SCALE_OPTIONS.map((s) => {
@@ -1039,6 +1130,9 @@ export default function LiveChart({
                   chartType={chartType}
                   showVolume={showVolume}
                   mas={mas}
+                  emas={emas}
+                  ribbon={ribbon}
+                  crosses={crosses}
                   priceScale={priceScale}
                   indicators={indicators}
                   bollinger={bollinger}
