@@ -89,6 +89,11 @@ interface CandleChartProps {
   displayStartTime?: number;
 }
 
+// Imperative handle the wrapper can call (e.g. to download a PNG of the chart).
+export interface CandleChartHandle {
+  exportPng: (filename: string) => void;
+}
+
 // ── Number / time formatting ─────────────────────────────────────────────────
 function fmtPrice(n: number): string {
   const digits = Math.abs(n) < 1 ? 6 : 2;
@@ -286,20 +291,23 @@ function roundRect(
   ctx.closePath();
 }
 
-export default function CandleChart({
-  candles,
-  interval,
-  currency,
-  range,
-  className,
-  chartType = "candles",
-  showVolume = true,
-  mas = [],
-  priceScale = "linear",
-  indicator = "none",
-  bollinger = false,
-  displayStartTime,
-}: CandleChartProps) {
+const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(function CandleChart(
+  {
+    candles,
+    interval,
+    currency,
+    range,
+    className,
+    chartType = "candles",
+    showVolume = true,
+    mas = [],
+    priceScale = "linear",
+    indicator = "none",
+    bollinger = false,
+    displayStartTime,
+  },
+  ref
+) {
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
@@ -322,7 +330,17 @@ export default function CandleChart({
     schedule: () => void;
     fit: () => void;
     reset: () => void;
+    exportPng: (filename: string) => void;
   } | null>(null);
+
+  // Expose imperative actions (PNG export) to the wrapper via ref.
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      exportPng: (filename: string) => apiRef.current?.exportPng(filename),
+    }),
+    []
+  );
 
   // ── Build the whole renderer once, on mount ─────────────────────────────────
   React.useEffect(() => {
@@ -376,6 +394,8 @@ export default function CandleChart({
     const size = { w: 0, h: 0 };
     const crosshair = { x: 0, y: 0, on: false };
     const drag = { on: false, lastX: 0 };
+    // Shift-drag measurement (Δprice / Δ% / bars between two points).
+    const measure = { on: false, x1: 0, y1: 0, x2: 0, y2: 0 };
     const pointers = new Map<number, { x: number; y: number }>();
     let pinchDist: number | null = null;
     let raf: number | null = null;
@@ -1012,6 +1032,62 @@ export default function CandleChart({
           ctx.fillText(`${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`, lx, ly);
         }
       }
+
+      // ── measure tool overlay (shift-drag) ──
+      if (measure.on) {
+        const { x1, y1, x2, y2 } = measure;
+        const p1 = priceForY(y1);
+        const p2 = priceForY(y2);
+        const dPrice = p2 - p1;
+        const dPct = p1 !== 0 ? (dPrice / p1) * 100 : 0;
+        const bars = Math.abs(Math.round(indexForX(x2)) - Math.round(indexForX(x1)));
+        const rising = dPrice >= 0;
+        const col = rising ? pal.up : pal.down;
+
+        ctx.save();
+        const rx = Math.min(x1, x2);
+        const ry = Math.min(y1, y2);
+        const rw = Math.abs(x2 - x1);
+        const rh = Math.abs(y2 - y1);
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = col;
+        ctx.fillRect(rx, ry, rw, rh);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(Math.round(rx) + 0.5, Math.round(ry) + 0.5, rw, rh);
+        ctx.setLineDash([]);
+
+        const sign = rising ? "+" : "";
+        const lines = [
+          `${sign}${fmtPrice(dPrice)}`,
+          `${sign}${dPct.toFixed(2)}%`,
+          `${bars} bar${bars === 1 ? "" : "s"}`,
+        ];
+        ctx.font = FONT;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        const tw = Math.max(...lines.map((t) => ctx.measureText(t).width));
+        const padX = 8;
+        const lineH = 15;
+        const boxW = tw + padX * 2;
+        const boxH = lines.length * lineH + 8;
+        let bx = x2 + 12;
+        let by = y2 + 12;
+        if (bx + boxW > L.right) bx = x2 - boxW - 12;
+        if (by + boxH > L.bottom) by = y2 - boxH - 12;
+        if (bx < L.left) bx = L.left + 2;
+        if (by < L.top) by = L.top + 2;
+        roundRect(ctx, bx, by, boxW, boxH, 6);
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.fillStyle = pal.onColorText;
+        for (let i = 0; i < lines.length; i++) {
+          ctx.fillText(lines[i], bx + padX, by + 4 + lineH / 2 + i * lineH);
+        }
+        ctx.restore();
+      }
     };
 
     const schedule = () => {
@@ -1040,8 +1116,26 @@ export default function CandleChart({
       schedule();
     };
 
+    // Download the current chart as a PNG. The canvas is already backed at
+    // devicePixelRatio resolution, so the export is crisp. We force a fresh draw
+    // so the saved frame matches exactly what's on screen.
+    const exportPng = (filename: string) => {
+      try {
+        draw();
+        const url = canvas.toDataURL("image/png");
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename || "chart.png";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } catch {
+        // tainted canvas / blocked download — non-fatal
+      }
+    };
+
     // Expose the bits the data effect needs, then do the first layout.
-    apiRef.current = { schedule, fit, reset };
+    apiRef.current = { schedule, fit, reset, exportPng };
     if (candlesRef.current.length > 0 && rangeRef.current === null) fit();
     applySize();
 
@@ -1065,13 +1159,25 @@ export default function CandleChart({
 
     const onPointerDown = (e: PointerEvent) => {
       canvas.setPointerCapture(e.pointerId);
-      pointers.set(e.pointerId, { x: relX(e.clientX), y: relY(e.clientY) });
+      const px = relX(e.clientX);
+      const py = relY(e.clientY);
+      pointers.set(e.pointerId, { x: px, y: py });
       if (pointers.size === 1) {
-        drag.on = true;
-        drag.lastX = relX(e.clientX);
-        crosshair.on = false;
+        if (e.shiftKey) {
+          // Shift-drag = measure, not pan.
+          measure.on = true;
+          measure.x1 = measure.x2 = px;
+          measure.y1 = measure.y2 = py;
+          drag.on = false;
+          crosshair.on = false;
+        } else {
+          drag.on = true;
+          drag.lastX = px;
+          crosshair.on = false;
+        }
       } else {
         drag.on = false;
+        measure.on = false;
         pinchDist = null;
       }
     };
@@ -1103,6 +1209,13 @@ export default function CandleChart({
         return;
       }
 
+      if (measure.on) {
+        measure.x2 = x;
+        measure.y2 = y;
+        schedule();
+        return;
+      }
+
       if (drag.on) {
         const dx = x - drag.lastX;
         drag.lastX = x;
@@ -1123,7 +1236,13 @@ export default function CandleChart({
     const endPointer = (e: PointerEvent) => {
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinchDist = null;
-      if (pointers.size === 0) drag.on = false;
+      if (pointers.size === 0) {
+        drag.on = false;
+        if (measure.on) {
+          measure.on = false;
+          schedule(); // clear the overlay
+        }
+      }
     };
 
     const onPointerLeave = () => {
@@ -1248,4 +1367,6 @@ export default function CandleChart({
       </button>
     </div>
   );
-}
+});
+
+export default CandleChart;

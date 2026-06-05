@@ -12,6 +12,7 @@ import {
   Search,
   Share2,
   Check,
+  Camera,
 } from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
 import { DiscordIcon } from "@/components/icons/discord";
@@ -20,6 +21,7 @@ import CandleChart, {
   type ChartType,
   type PriceScale,
   type Indicator,
+  type CandleChartHandle,
 } from "./_candle-chart";
 
 // Moving averages the page offers as toggleable overlays.
@@ -352,6 +354,12 @@ export default function LiveChart({
 
   const prevPriceRef = React.useRef<number | null>(null);
   const flashTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chartRef = React.useRef<CandleChartHandle>(null);
+
+  const onScreenshot = React.useCallback(() => {
+    const name = `${(data?.symbol ?? symbol).toUpperCase()}-${range}.png`;
+    chartRef.current?.exportPng(name);
+  }, [data?.symbol, symbol, range]);
 
   const toggleMa = React.useCallback((period: number) => {
     setMas((prev) =>
@@ -777,6 +785,18 @@ export default function LiveChart({
                 {copied ? <Check className="size-3.5" /> : <Share2 className="size-3.5" />}
                 {copied ? "Copied" : "Share"}
               </button>
+
+              {/* Screenshot / PNG export */}
+              <button
+                onClick={onScreenshot}
+                className="inline-flex items-center gap-1.5 rounded-full border border-card-border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors"
+                style={{ background: "var(--card)", color: "var(--muted-foreground)" }}
+                aria-label="Download a PNG of this chart"
+                title="Download a PNG of this chart"
+              >
+                <Camera className="size-3.5" />
+                PNG
+              </button>
             </div>
 
             {/* Ticker search */}
@@ -807,6 +827,7 @@ export default function LiveChart({
             <div className="relative h-[320px] w-full sm:h-[420px]">
               {data && (
                 <CandleChart
+                  ref={chartRef}
                   candles={data.candles}
                   interval={data.interval}
                   currency={data.currency}
