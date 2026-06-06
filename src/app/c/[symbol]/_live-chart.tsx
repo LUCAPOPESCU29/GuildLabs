@@ -89,8 +89,19 @@ const INDICATOR_OPTIONS: ReadonlyArray<{ key: Indicator; label: string }> = [
   { key: "stoch", label: "Stoch" },
   { key: "atr", label: "ATR" },
   { key: "obv", label: "OBV" },
+  { key: "adx", label: "ADX" },
+  { key: "cci", label: "CCI" },
+  { key: "wpr", label: "%R" },
+  { key: "mfi", label: "MFI" },
+  { key: "cmf", label: "CMF" },
+  { key: "ao", label: "AO" },
+  { key: "roc", label: "ROC" },
+  { key: "stochrsi", label: "StochRSI" },
+  { key: "ad", label: "A/D" },
+  { key: "stddev", label: "StdDev" },
+  { key: "bbp", label: "Bull/Bear" },
 ];
-const MAX_PANES = 3;
+const MAX_PANES = 4;
 
 // Purple + green chart theme, drawn from the FORGE design tokens so the page
 // shares the site's palette and tracks light/dark automatically: green
@@ -198,7 +209,7 @@ const isChartType = (v: unknown): v is ChartType =>
 const isPriceScale = (v: unknown): v is PriceScale =>
   v === "linear" || v === "log" || v === "percent";
 const isIndicator = (v: unknown): v is Indicator =>
-  v === "rsi" || v === "macd" || v === "stoch" || v === "atr" || v === "obv";
+  INDICATOR_OPTIONS.some((o) => o.key === v);
 
 // Accept a list (current) or a single legacy string ("rsi"/"none") and return a
 // validated, de-duped, capped indicator array.

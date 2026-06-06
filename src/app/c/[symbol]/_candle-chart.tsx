@@ -55,7 +55,23 @@ export type PriceScale = "linear" | "log" | "percent";
 // Oscillators drawn in stacked sub-panels below the chart. Multiple may be active
 // at once (each gets its own pane): RSI(14), MACD(12/26/9), Stochastic(14/3),
 // ATR(14), OBV.
-export type Indicator = "rsi" | "macd" | "stoch" | "atr" | "obv";
+export type Indicator =
+  | "rsi"
+  | "macd"
+  | "stoch"
+  | "atr"
+  | "obv"
+  | "adx"
+  | "cci"
+  | "wpr"
+  | "mfi"
+  | "cmf"
+  | "ao"
+  | "roc"
+  | "stochrsi"
+  | "ad"
+  | "stddev"
+  | "bbp";
 
 // User-tunable periods/params for the indicators (defaults match the classics).
 export interface IndicatorSettings {
@@ -750,6 +766,213 @@ function computeZigZag(cs: Candle[], deviation = 5): Array<{ i: number; p: numbe
   void lastPivotIdx;
   return pts;
 }
+
+// Standard deviation of close over a window.
+function computeStdDev(cs: Candle[], period = 20): Series {
+  const out: Series = new Array(cs.length).fill(null);
+  if (cs.length < period) return out;
+  for (let i = period - 1; i < cs.length; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += cs[j].close;
+    const mean = sum / period;
+    let v = 0;
+    for (let j = i - period + 1; j <= i; j++) v += (cs[j].close - mean) ** 2;
+    out[i] = Math.sqrt(v / period);
+  }
+  return out;
+}
+
+// CCI.
+function computeCCI(cs: Candle[], period = 20): Series {
+  const out: Series = new Array(cs.length).fill(null);
+  const tp = cs.map((c) => (c.high + c.low + c.close) / 3);
+  for (let i = period - 1; i < cs.length; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += tp[j];
+    const mean = sum / period;
+    let md = 0;
+    for (let j = i - period + 1; j <= i; j++) md += Math.abs(tp[j] - mean);
+    md /= period;
+    out[i] = md === 0 ? 0 : (tp[i] - mean) / (0.015 * md);
+  }
+  return out;
+}
+
+// Williams %R.
+function computeWilliamsR(cs: Candle[], period = 14): Series {
+  const out: Series = new Array(cs.length).fill(null);
+  for (let i = 0; i < cs.length; i++) {
+    const hh = rollHigh(cs, i, period);
+    const ll = rollLow(cs, i, period);
+    if (hh != null && ll != null && hh !== ll) out[i] = (-100 * (hh - cs[i].close)) / (hh - ll);
+    else if (hh != null && ll != null) out[i] = -50;
+  }
+  return out;
+}
+
+// Money Flow Index.
+function computeMFI(cs: Candle[], period = 14): Series {
+  const out: Series = new Array(cs.length).fill(null);
+  const tp = cs.map((c) => (c.high + c.low + c.close) / 3);
+  for (let i = period; i < cs.length; i++) {
+    let pos = 0;
+    let neg = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const vol = typeof cs[j].volume === "number" ? (cs[j].volume as number) : 0;
+      const mf = tp[j] * vol;
+      if (tp[j] > tp[j - 1]) pos += mf;
+      else if (tp[j] < tp[j - 1]) neg += mf;
+    }
+    out[i] = neg === 0 ? 100 : 100 - 100 / (1 + pos / neg);
+  }
+  return out;
+}
+
+// Chaikin Money Flow.
+function computeCMF(cs: Candle[], period = 20): Series {
+  const out: Series = new Array(cs.length).fill(null);
+  for (let i = period - 1; i < cs.length; i++) {
+    let mfv = 0;
+    let vv = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const vol = typeof cs[j].volume === "number" ? (cs[j].volume as number) : 0;
+      const range = cs[j].high - cs[j].low;
+      const m = range === 0 ? 0 : (cs[j].close - cs[j].low - (cs[j].high - cs[j].close)) / range;
+      mfv += m * vol;
+      vv += vol;
+    }
+    out[i] = vv > 0 ? mfv / vv : 0;
+  }
+  return out;
+}
+
+// Awesome Oscillator: SMA(median,5) − SMA(median,34).
+function computeAO(cs: Candle[]): Series {
+  const med = cs.map((c) => ({ time: c.time, open: 0, high: 0, low: 0, close: (c.high + c.low) / 2, volume: null }) as Candle);
+  const f = computeSMA(med, 5);
+  const s = computeSMA(med, 34);
+  return cs.map((_, i) => (f[i] != null && s[i] != null ? (f[i] as number) - (s[i] as number) : null));
+}
+
+// Rate of Change (%).
+function computeROC(cs: Candle[], period = 9): Series {
+  const out: Series = new Array(cs.length).fill(null);
+  for (let i = period; i < cs.length; i++) {
+    const prev = cs[i - period].close;
+    out[i] = prev ? (cs[i].close / prev - 1) * 100 : null;
+  }
+  return out;
+}
+
+// Stochastic RSI.
+function computeStochRSI(cs: Candle[], rsiP = 14, stochP = 14, kP = 3, dP = 3): { k: Series; d: Series } {
+  const rsi = computeRSI(cs, rsiP);
+  const stoch: Series = new Array(cs.length).fill(null);
+  for (let i = 0; i < cs.length; i++) {
+    if (rsi[i] == null) continue;
+    let lo = Infinity;
+    let hi = -Infinity;
+    let ok = true;
+    for (let j = i - stochP + 1; j <= i; j++) {
+      if (j < 0 || rsi[j] == null) {
+        ok = false;
+        break;
+      }
+      const r = rsi[j] as number;
+      if (r < lo) lo = r;
+      if (r > hi) hi = r;
+    }
+    if (ok) stoch[i] = hi === lo ? 50 : (100 * ((rsi[i] as number) - lo)) / (hi - lo);
+  }
+  // %K = SMA(stoch, kP), %D = SMA(%K, dP)
+  const sma = (arr: Series, p: number): Series => {
+    const o: Series = new Array(arr.length).fill(null);
+    for (let i = 0; i < arr.length; i++) {
+      let sum = 0;
+      let cnt = 0;
+      for (let j = i - p + 1; j <= i; j++) {
+        if (j < 0 || arr[j] == null) {
+          cnt = 0;
+          break;
+        }
+        sum += arr[j] as number;
+        cnt++;
+      }
+      if (cnt === p) o[i] = sum / p;
+    }
+    return o;
+  };
+  const k = sma(stoch, kP);
+  return { k, d: sma(k, dP) };
+}
+
+// Accumulation/Distribution line.
+function computeAD(cs: Candle[]): Series {
+  const out: Series = new Array(cs.length).fill(null);
+  let ad = 0;
+  for (let i = 0; i < cs.length; i++) {
+    const range = cs[i].high - cs[i].low;
+    const vol = typeof cs[i].volume === "number" ? (cs[i].volume as number) : 0;
+    const m = range === 0 ? 0 : (cs[i].close - cs[i].low - (cs[i].high - cs[i].close)) / range;
+    ad += m * vol;
+    out[i] = ad;
+  }
+  return out;
+}
+
+// ADX / DMI (Wilder).
+function computeADX(cs: Candle[], period = 14): { plusDI: Series; minusDI: Series; adx: Series } {
+  const n = cs.length;
+  const plusDI: Series = new Array(n).fill(null);
+  const minusDI: Series = new Array(n).fill(null);
+  const adx: Series = new Array(n).fill(null);
+  if (n <= period) return { plusDI, minusDI, adx };
+  const tr: number[] = new Array(n).fill(0);
+  const pDM: number[] = new Array(n).fill(0);
+  const mDM: number[] = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const up = cs[i].high - cs[i - 1].high;
+    const down = cs[i - 1].low - cs[i].low;
+    pDM[i] = up > down && up > 0 ? up : 0;
+    mDM[i] = down > up && down > 0 ? down : 0;
+    tr[i] = Math.max(cs[i].high - cs[i].low, Math.abs(cs[i].high - cs[i - 1].close), Math.abs(cs[i].low - cs[i - 1].close));
+  }
+  let atr = 0;
+  let aP = 0;
+  let aM = 0;
+  for (let i = 1; i <= period; i++) {
+    atr += tr[i];
+    aP += pDM[i];
+    aM += mDM[i];
+  }
+  const dxArr: number[] = [];
+  for (let i = period + 1; i < n; i++) {
+    atr = atr - atr / period + tr[i];
+    aP = aP - aP / period + pDM[i];
+    aM = aM - aM / period + mDM[i];
+    const pdi = atr ? (100 * aP) / atr : 0;
+    const mdi = atr ? (100 * aM) / atr : 0;
+    plusDI[i] = pdi;
+    minusDI[i] = mdi;
+    const dx = pdi + mdi ? (100 * Math.abs(pdi - mdi)) / (pdi + mdi) : 0;
+    dxArr.push(dx);
+    if (dxArr.length === period) {
+      adx[i] = dxArr.reduce((a, b) => a + b, 0) / period;
+    } else if (dxArr.length > period) {
+      adx[i] = (((adx[i - 1] as number) ?? 0) * (period - 1) + dx) / period;
+    }
+  }
+  return { plusDI, minusDI, adx };
+}
+
+// Elder Bull/Bear Power around an EMA.
+function computeBullBear(cs: Candle[], period = 13): { bull: Series; bear: Series } {
+  const ema = computeEMA(closesOf(cs), period);
+  const bull: Series = cs.map((c, i) => (ema[i] != null ? c.high - (ema[i] as number) : null));
+  const bear: Series = cs.map((c, i) => (ema[i] != null ? c.low - (ema[i] as number) : null));
+  return { bull, bear };
+}
+
 
 // Compact volume formatting: 12.3M, 4.5K, etc.
 function fmtVol(n: number): string {
@@ -1783,6 +2006,39 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           const lv = lastVal(arr);
           legend(pane, `${label}${lv != null ? `  ${fmt(lv)}` : ""}`);
         };
+        // Multiple auto-scaled lines in one pane, with an optional zero line.
+        const drawLines = (
+          pane: Pane,
+          lines: Array<{ arr: Array<number | null>; color: string }>,
+          label: string,
+          zeroLine = false
+        ) => {
+          const { mn, mx } = visExtent(lines.map((l) => l.arr));
+          const pad = (mx - mn) * 0.1 || 1;
+          const lo2 = mn - pad;
+          const hi2 = mx + pad;
+          const sp2 = hi2 - lo2 || 1;
+          const yFor = (val: number) => pane.top + ((hi2 - val) / sp2) * pane.h;
+          ctx.save();
+          clipPane(pane);
+          if (zeroLine && lo2 < 0 && hi2 > 0) {
+            ctx.strokeStyle = pal.gridSoft;
+            ctx.lineWidth = 1;
+            const zy = yFor(0);
+            ctx.beginPath();
+            ctx.moveTo(L.left, Math.round(zy) + 0.5);
+            ctx.lineTo(L.right, Math.round(zy) + 0.5);
+            ctx.stroke();
+          }
+          for (const l of lines) strokeSeries(l.arr, l.color, yFor);
+          ctx.restore();
+          ctx.fillStyle = pal.axisText;
+          ctx.textAlign = "left";
+          ctx.fillText(hi2.toFixed(2), L.right + 6, pane.top + 7);
+          ctx.fillText(lo2.toFixed(2), L.right + 6, pane.bottom - 6);
+          const lv = lastVal(lines[0].arr);
+          legend(pane, `${label}${lv != null ? `  ${lv.toFixed(2)}` : ""}`);
+        };
 
         for (let pi = 0; pi < inds.length; pi++) {
           const pane = L.indPanes[pi];
@@ -1810,6 +2066,58 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             drawSingle(pane, computeATR(cs, s.atr), pal.ma[2] ?? pal.chipBg, `ATR ${s.atr}`, (n) => fmtPrice(n));
           } else if (kind === "obv") {
             drawSingle(pane, computeOBV(cs), pal.ma[1], "OBV", (n) => fmtVol(n));
+          } else if (kind === "adx") {
+            const { plusDI, minusDI, adx } = computeADX(cs, 14);
+            drawLines(
+              pane,
+              [
+                { arr: adx, color: pal.chipBg },
+                { arr: plusDI, color: pal.up },
+                { arr: minusDI, color: pal.down },
+              ],
+              "ADX 14"
+            );
+          } else if (kind === "cci") {
+            drawLines(pane, [{ arr: computeCCI(cs, 20), color: pal.ma[1] }], "CCI 20", true);
+          } else if (kind === "wpr") {
+            drawLines(pane, [{ arr: computeWilliamsR(cs, 14), color: pal.ma[1] }], "%R 14");
+          } else if (kind === "mfi") {
+            const mfi = computeMFI(cs, 14);
+            drawBanded(pane, [{ arr: mfi, color: pal.ma[1] }], 80, 20, "MFI 14", mfi);
+          } else if (kind === "cmf") {
+            drawLines(pane, [{ arr: computeCMF(cs, 20), color: pal.ma[1] }], "CMF 20", true);
+          } else if (kind === "ao") {
+            drawLines(pane, [{ arr: computeAO(cs), color: pal.ma[1] }], "AO", true);
+          } else if (kind === "roc") {
+            drawLines(pane, [{ arr: computeROC(cs, 9), color: pal.ma[1] }], "ROC 9", true);
+          } else if (kind === "stochrsi") {
+            const { k, d } = computeStochRSI(cs);
+            drawBanded(
+              pane,
+              [
+                { arr: k, color: pal.ma[1] },
+                { arr: d, color: pal.ma[0] },
+              ],
+              80,
+              20,
+              "StochRSI",
+              k
+            );
+          } else if (kind === "ad") {
+            drawSingle(pane, computeAD(cs), pal.ma[1], "A/D", (n) => fmtVol(n));
+          } else if (kind === "stddev") {
+            drawSingle(pane, computeStdDev(cs, 20), pal.ma[2] ?? pal.chipBg, "StdDev 20", (n) => fmtPrice(n));
+          } else if (kind === "bbp") {
+            const { bull, bear } = computeBullBear(cs, 13);
+            drawLines(
+              pane,
+              [
+                { arr: bull, color: pal.up },
+                { arr: bear, color: pal.down },
+              ],
+              "Bull/Bear 13",
+              true
+            );
           }
         }
       }
