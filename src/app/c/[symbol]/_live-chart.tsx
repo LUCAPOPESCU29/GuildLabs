@@ -34,8 +34,28 @@ import CandleChart, {
   type PriceScale,
   type Indicator,
   type IndicatorSettings,
+  type MaType,
   type CandleChartHandle,
 } from "./_candle-chart";
+
+const MA_TYPES: ReadonlyArray<{ key: MaType; label: string }> = [
+  { key: "sma", label: "SMA" },
+  { key: "ema", label: "EMA" },
+  { key: "wma", label: "WMA" },
+  { key: "hma", label: "HMA" },
+  { key: "vwma", label: "VWMA" },
+];
+// TradingView-parity price overlays toggled in the Indicators popover.
+const TV_OVERLAYS = [
+  { key: "ichimoku", label: "Ichimoku" },
+  { key: "psar", label: "PSAR" },
+  { key: "supertrend", label: "Supertrend" },
+  { key: "keltner", label: "Keltner" },
+  { key: "donchian", label: "Donchian" },
+  { key: "linreg", label: "LinReg" },
+  { key: "zigzag", label: "ZigZag" },
+] as const;
+type TvOverlayKey = (typeof TV_OVERLAYS)[number]["key"];
 
 // Moving averages the page offers as toggleable overlays.
 const MA_OPTIONS = [20, 50] as const;
@@ -143,7 +163,19 @@ interface ChartPrefs {
   cr: boolean;
   cfg: IndicatorSettings;
   dw: boolean;
+  mat: MaType;
+  ov: TvOverlayKey[];
+  piv: "off" | "std" | "fib";
 }
+
+const isMaType = (v: unknown): v is MaType =>
+  v === "sma" || v === "ema" || v === "wma" || v === "hma" || v === "vwma";
+const isTvOverlay = (v: unknown): v is TvOverlayKey =>
+  (TV_OVERLAYS as ReadonlyArray<{ key: string }>).some((o) => o.key === v);
+const sanitizeOverlays = (v: unknown): TvOverlayKey[] | undefined =>
+  Array.isArray(v) ? [...new Set(v.filter(isTvOverlay))] : undefined;
+const isPivot = (v: unknown): v is "off" | "std" | "fib" =>
+  v === "off" || v === "std" || v === "fib";
 
 // Validate a partial settings object, keeping only sane positive numbers.
 function sanitizeSettings(v: unknown): IndicatorSettings | undefined {
@@ -211,6 +243,10 @@ function readStoredPrefs(): Partial<ChartPrefs> {
     const cfg = sanitizeSettings(p.cfg);
     if (cfg) out.cfg = cfg;
     if (typeof p.dw === "boolean") out.dw = p.dw;
+    if (isMaType(p.mat)) out.mat = p.mat;
+    const ov = sanitizeOverlays(p.ov);
+    if (ov) out.ov = ov;
+    if (isPivot(p.piv)) out.piv = p.piv;
     const ma = sanitizeMas(p.ma);
     if (ma) out.ma = ma;
     return out;
@@ -252,6 +288,15 @@ function readUrlPrefs(): Partial<ChartPrefs> {
   if (cr === "0" || cr === "1") out.cr = cr === "1";
   const dw = q.get("dw");
   if (dw === "0" || dw === "1") out.dw = dw === "1";
+  const mat = q.get("mat");
+  if (isMaType(mat)) out.mat = mat;
+  const ovRaw = q.get("ov");
+  if (ovRaw != null) {
+    const ov = sanitizeOverlays(ovRaw.split(",").map((s) => s.trim()));
+    if (ov) out.ov = ov;
+  }
+  const piv = q.get("piv");
+  if (isPivot(piv)) out.piv = piv;
   const cfgRaw = q.get("cfg");
   if (cfgRaw) {
     try {
@@ -471,6 +516,13 @@ export default function LiveChart({
   const [showIndicators, setShowIndicators] = React.useState(false);
   const [dataWindow, setDataWindow] = React.useState(false);
   const [showHelp, setShowHelp] = React.useState(false);
+  const [maType, setMaType] = React.useState<MaType>("sma");
+  const [tvOverlays, setTvOverlays] = React.useState<TvOverlayKey[]>([]);
+  const [pivots, setPivots] = React.useState<"off" | "std" | "fib">("off");
+  const tvOn = (k: TvOverlayKey) => tvOverlays.includes(k);
+  const toggleTv = React.useCallback((k: TvOverlayKey) => {
+    setTvOverlays((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
+  }, []);
   const [replay, setReplay] = React.useState(false);
   const [replayIdx, setReplayIdx] = React.useState(0);
   const [replayPlaying, setReplayPlaying] = React.useState(false);
@@ -688,6 +740,9 @@ export default function LiveChart({
     if (p.cr != null) setCrosses(p.cr);
     if (p.cfg != null) setSettings(p.cfg);
     if (p.dw != null) setDataWindow(p.dw);
+    if (p.mat != null) setMaType(p.mat);
+    if (p.ov != null) setTvOverlays(p.ov);
+    if (p.piv != null) setPivots(p.piv);
     // compare ticker rides the URL only (not localStorage)
     const cmp = new URLSearchParams(window.location.search).get("cmp");
     if (cmp) setCompareSymbol(cmp.toUpperCase());
@@ -712,12 +767,15 @@ export default function LiveChart({
         cr: crosses,
         cfg: settings,
         dw: dataWindow,
+        mat: maType,
+        ov: tvOverlays,
+        piv: pivots,
       };
       window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     } catch {
       // storage full / disabled — non-fatal
     }
-  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, settings, dataWindow]);
+  }, [prefsReady, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, settings, dataWindow, maType, tvOverlays, pivots]);
 
   // Build a shareable deep link encoding the current view, copy to clipboard.
   const onShare = React.useCallback(() => {
@@ -739,6 +797,9 @@ export default function LiveChart({
       params.set("cfg", encodeURIComponent(JSON.stringify(settings)));
     }
     if (dataWindow) params.set("dw", "1");
+    if (maType !== "sma") params.set("mat", maType);
+    if (tvOverlays.length) params.set("ov", tvOverlays.join(","));
+    if (pivots !== "off") params.set("piv", pivots);
     if (compareSymbol) params.set("cmp", compareSymbol);
     const url = `${window.location.origin}/c/${encodeURIComponent(symbol)}?${params}`;
     const done = () => {
@@ -747,7 +808,7 @@ export default function LiveChart({
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     };
     navigator.clipboard?.writeText(url).then(done).catch(done);
-  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, settings, dataWindow, compareSymbol, symbol]);
+  }, [range, chartType, showVolume, mas, priceScale, indicators, bollinger, vwap, volumeProfile, emas, ribbon, crosses, settings, dataWindow, maType, tvOverlays, pivots, compareSymbol, symbol]);
 
   // ── Price flash on tick ────────────────────────────────────────────────────
   // The CandleChart owns all rendering; here we only watch the price for the
@@ -767,6 +828,8 @@ export default function LiveChart({
     mas.length +
     emas.length +
     indicators.length +
+    tvOverlays.length +
+    (pivots !== "off" ? 1 : 0) +
     [bollinger, vwap, volumeProfile, ribbon, crosses].filter(Boolean).length;
 
   const up = (data?.change ?? 0) >= 0;
@@ -1022,8 +1085,27 @@ export default function LiveChart({
                   </div>
 
                   <div>
-                    <div className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Moving averages
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                        Moving averages
+                      </span>
+                      <div className="inline-flex overflow-hidden rounded-full border border-card-border">
+                        {MA_TYPES.map((t) => (
+                          <button
+                            key={t.key}
+                            onClick={() => setMaType(t.key)}
+                            className="px-1.5 py-0.5 font-mono text-[9px] font-bold"
+                            style={
+                              maType === t.key
+                                ? { background: UP, color: "#000" }
+                                : { color: "var(--muted-foreground)" }
+                            }
+                            title={`${t.label} for the MA periods`}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       {MA_OPTIONS.map((p) => {
@@ -1064,6 +1146,46 @@ export default function LiveChart({
                           </button>
                         );
                       })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      Overlays · advanced
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {TV_OVERLAYS.map((o) => {
+                        const active = tvOn(o.key);
+                        return (
+                          <button
+                            key={o.key}
+                            onClick={() => toggleTv(o.key)}
+                            className="rounded-full border px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wider transition-all active:scale-95"
+                            style={
+                              active
+                                ? { background: UP, color: "#000", borderColor: "transparent" }
+                                : { background: "var(--card)", color: "var(--muted-foreground)", borderColor: "var(--card-border)" }
+                            }
+                            aria-pressed={active}
+                          >
+                            {o.label}
+                          </button>
+                        );
+                      })}
+                      {/* Pivots cycle off → std → fib */}
+                      <button
+                        onClick={() => setPivots((p) => (p === "off" ? "std" : p === "std" ? "fib" : "off"))}
+                        className="rounded-full border px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wider transition-all active:scale-95"
+                        style={
+                          pivots !== "off"
+                            ? { background: UP, color: "#000", borderColor: "transparent" }
+                            : { background: "var(--card)", color: "var(--muted-foreground)", borderColor: "var(--card-border)" }
+                        }
+                        aria-pressed={pivots !== "off"}
+                        title="Pivot points (off / standard / Fibonacci)"
+                      >
+                        Pivots{pivots !== "off" ? ` ${pivots}` : ""}
+                      </button>
                     </div>
                   </div>
 
@@ -1297,6 +1419,15 @@ export default function LiveChart({
                   priceScale={priceScale}
                   indicators={indicators}
                   bollinger={bollinger}
+                  maType={maType}
+                  ichimoku={tvOn("ichimoku")}
+                  psar={tvOn("psar")}
+                  supertrend={tvOn("supertrend")}
+                  keltner={tvOn("keltner")}
+                  donchian={tvOn("donchian")}
+                  linreg={tvOn("linreg")}
+                  zigzag={tvOn("zigzag")}
+                  pivots={pivots}
                   indicatorSettings={settings}
                   symbol={(data.symbol ?? symbol).toUpperCase()}
                   compare={compareData}

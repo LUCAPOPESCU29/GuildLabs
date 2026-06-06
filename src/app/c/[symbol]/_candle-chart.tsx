@@ -163,6 +163,15 @@ interface CandleChartProps {
   priceScale?: PriceScale;
   indicators?: Indicator[]; // stacked oscillator sub-panels below the chart
   bollinger?: boolean; // Bollinger Bands (20, 2σ) overlay on the price series
+  maType?: MaType; // SMA/EMA/WMA/HMA/VWMA for the MA-period overlays
+  ichimoku?: boolean;
+  psar?: boolean;
+  supertrend?: boolean;
+  keltner?: boolean;
+  donchian?: boolean;
+  pivots?: "off" | "std" | "fib";
+  linreg?: boolean;
+  zigzag?: boolean;
   indicatorSettings?: Partial<IndicatorSettings>; // tunable periods/params
   symbol?: string; // primary ticker (for drawings key + compare legend)
   compare?: { symbol: string; candles: Candle[] } | null; // overlay (normalized %)
@@ -457,6 +466,291 @@ function computeOBV(cs: Candle[]): Array<number | null> {
   return out;
 }
 
+// ── Additional indicators (TradingView-parity) ───────────────────────────────
+type Series = Array<number | null>;
+const closesOf = (cs: Candle[]) => cs.map((c) => c.close);
+
+// Weighted MA over a plain number series (linear weights 1..period).
+function computeWMA(values: number[], period: number): Series {
+  const out: Series = new Array(values.length).fill(null);
+  if (period <= 0 || values.length < period) return out;
+  const denom = (period * (period + 1)) / 2;
+  for (let i = period - 1; i < values.length; i++) {
+    let s = 0;
+    for (let j = 0; j < period; j++) s += values[i - period + 1 + j] * (j + 1);
+    out[i] = s / denom;
+  }
+  return out;
+}
+// WMA tolerating null-prefixed input (used for HMA's final smoothing).
+function wmaNullable(arr: Series, period: number): Series {
+  const out: Series = new Array(arr.length).fill(null);
+  const denom = (period * (period + 1)) / 2;
+  for (let i = period - 1; i < arr.length; i++) {
+    let s = 0;
+    let ok = true;
+    for (let j = 0; j < period; j++) {
+      const v = arr[i - period + 1 + j];
+      if (v == null) {
+        ok = false;
+        break;
+      }
+      s += v * (j + 1);
+    }
+    if (ok) out[i] = s / denom;
+  }
+  return out;
+}
+// Hull MA = WMA(2·WMA(n/2) − WMA(n), sqrt(n)).
+function computeHMA(values: number[], period: number): Series {
+  const half = Math.max(1, Math.round(period / 2));
+  const sq = Math.max(1, Math.round(Math.sqrt(period)));
+  const wHalf = computeWMA(values, half);
+  const wFull = computeWMA(values, period);
+  const diff: Series = values.map((_, i) =>
+    wHalf[i] != null && wFull[i] != null ? 2 * (wHalf[i] as number) - (wFull[i] as number) : null
+  );
+  return wmaNullable(diff, sq);
+}
+// Volume-weighted MA.
+function computeVWMA(cs: Candle[], period: number): Series {
+  const out: Series = new Array(cs.length).fill(null);
+  if (cs.length < period) return out;
+  for (let i = period - 1; i < cs.length; i++) {
+    let pv = 0;
+    let vv = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const v = typeof cs[j].volume === "number" ? (cs[j].volume as number) : 0;
+      pv += cs[j].close * v;
+      vv += v;
+    }
+    out[i] = vv > 0 ? pv / vv : null;
+  }
+  return out;
+}
+export type MaType = "sma" | "ema" | "wma" | "hma" | "vwma";
+function computeMA(cs: Candle[], period: number, type: MaType): Series {
+  const cl = closesOf(cs);
+  switch (type) {
+    case "ema":
+      return computeEMA(cl, period);
+    case "wma":
+      return computeWMA(cl, period);
+    case "hma":
+      return computeHMA(cl, period);
+    case "vwma":
+      return computeVWMA(cs, period);
+    default:
+      return computeSMA(cs, period);
+  }
+}
+
+// Rolling highest-high / lowest-low helpers.
+function rollHigh(cs: Candle[], i: number, p: number): number | null {
+  if (i < p - 1) return null;
+  let m = -Infinity;
+  for (let j = i - p + 1; j <= i; j++) if (cs[j].high > m) m = cs[j].high;
+  return m;
+}
+function rollLow(cs: Candle[], i: number, p: number): number | null {
+  if (i < p - 1) return null;
+  let m = Infinity;
+  for (let j = i - p + 1; j <= i; j++) if (cs[j].low < m) m = cs[j].low;
+  return m;
+}
+
+// Ichimoku: conversion/base lines + forward-displaced spans + lagging close.
+function computeIchimoku(cs: Candle[], conv = 9, base = 26, spanB = 52) {
+  const n = cs.length;
+  const tenkan: Series = new Array(n).fill(null);
+  const kijun: Series = new Array(n).fill(null);
+  const spanA: Series = new Array(n).fill(null);
+  const spanBArr: Series = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    const th = rollHigh(cs, i, conv);
+    const tl = rollLow(cs, i, conv);
+    const bh = rollHigh(cs, i, base);
+    const bl = rollLow(cs, i, base);
+    if (th != null && tl != null) tenkan[i] = (th + tl) / 2;
+    if (bh != null && bl != null) kijun[i] = (bh + bl) / 2;
+    if (tenkan[i] != null && kijun[i] != null) spanA[i] = ((tenkan[i] as number) + (kijun[i] as number)) / 2;
+    const sh = rollHigh(cs, i, spanB);
+    const sl = rollLow(cs, i, spanB);
+    if (sh != null && sl != null) spanBArr[i] = (sh + sl) / 2;
+  }
+  return { tenkan, kijun, spanA, spanB: spanBArr, displacement: base };
+}
+
+// Parabolic SAR.
+function computePSAR(cs: Candle[], step = 0.02, max = 0.2): Series {
+  const out: Series = new Array(cs.length).fill(null);
+  if (cs.length < 2) return out;
+  let rising = cs[1].close >= cs[0].close;
+  let af = step;
+  let ep = rising ? cs[0].high : cs[0].low;
+  let sar = rising ? cs[0].low : cs[0].high;
+  out[0] = sar;
+  for (let i = 1; i < cs.length; i++) {
+    sar = sar + af * (ep - sar);
+    if (rising) {
+      if (cs[i].low < sar) {
+        rising = false;
+        sar = ep;
+        ep = cs[i].low;
+        af = step;
+      } else {
+        if (cs[i].high > ep) {
+          ep = cs[i].high;
+          af = Math.min(max, af + step);
+        }
+        sar = Math.min(sar, cs[i - 1].low, i >= 2 ? cs[i - 2].low : cs[i - 1].low);
+      }
+    } else {
+      if (cs[i].high > sar) {
+        rising = true;
+        sar = ep;
+        ep = cs[i].high;
+        af = step;
+      } else {
+        if (cs[i].low < ep) {
+          ep = cs[i].low;
+          af = Math.min(max, af + step);
+        }
+        sar = Math.max(sar, cs[i - 1].high, i >= 2 ? cs[i - 2].high : cs[i - 1].high);
+      }
+    }
+    out[i] = sar;
+  }
+  return out;
+}
+
+// Supertrend (ATR bands with trend flips). Returns line + direction (1 up / -1 down).
+function computeSupertrend(cs: Candle[], period = 10, mult = 3): { line: Series; dir: Array<number | null> } {
+  const n = cs.length;
+  const atr = computeATR(cs, period);
+  const line: Series = new Array(n).fill(null);
+  const dir: Array<number | null> = new Array(n).fill(null);
+  let finalUpper: number | null = null;
+  let finalLower: number | null = null;
+  let prevDir = 1;
+  for (let i = 0; i < n; i++) {
+    const a = atr[i];
+    if (a == null) continue;
+    const hl2 = (cs[i].high + cs[i].low) / 2;
+    const bu = hl2 + mult * a;
+    const bl = hl2 - mult * a;
+    const prevClose = i > 0 ? cs[i - 1].close : cs[i].close;
+    const pu: number | null = finalUpper;
+    const pl: number | null = finalLower;
+    const fu: number = pu == null || bu < pu || prevClose > pu ? bu : pu;
+    const fl: number = pl == null || bl > pl || prevClose < pl ? bl : pl;
+    let d = prevDir;
+    if (pu != null && cs[i].close > fu) d = 1;
+    else if (pl != null && cs[i].close < fl) d = -1;
+    line[i] = d === 1 ? fl : fu;
+    dir[i] = d;
+    finalUpper = fu;
+    finalLower = fl;
+    prevDir = d;
+  }
+  return { line, dir };
+}
+
+// Keltner Channels: EMA ± mult·ATR.
+function computeKeltner(cs: Candle[], emaP = 20, atrP = 10, mult = 2) {
+  const mid = computeEMA(closesOf(cs), emaP);
+  const atr = computeATR(cs, atrP);
+  const upper: Series = new Array(cs.length).fill(null);
+  const lower: Series = new Array(cs.length).fill(null);
+  for (let i = 0; i < cs.length; i++) {
+    if (mid[i] != null && atr[i] != null) {
+      upper[i] = (mid[i] as number) + mult * (atr[i] as number);
+      lower[i] = (mid[i] as number) - mult * (atr[i] as number);
+    }
+  }
+  return { mid, upper, lower };
+}
+
+// Donchian Channels.
+function computeDonchian(cs: Candle[], period = 20) {
+  const upper: Series = new Array(cs.length).fill(null);
+  const lower: Series = new Array(cs.length).fill(null);
+  const mid: Series = new Array(cs.length).fill(null);
+  for (let i = 0; i < cs.length; i++) {
+    const u = rollHigh(cs, i, period);
+    const l = rollLow(cs, i, period);
+    if (u != null && l != null) {
+      upper[i] = u;
+      lower[i] = l;
+      mid[i] = (u + l) / 2;
+    }
+  }
+  return { upper, lower, mid };
+}
+
+// Classic & Fibonacci pivot points from the last fully-formed prior bar.
+function computePivots(cs: Candle[], fib = false): Record<string, number> | null {
+  if (cs.length < 2) return null;
+  const b = cs[cs.length - 2];
+  const P = (b.high + b.low + b.close) / 3;
+  const range = b.high - b.low;
+  if (fib) {
+    return {
+      P,
+      R1: P + 0.382 * range,
+      R2: P + 0.618 * range,
+      R3: P + range,
+      S1: P - 0.382 * range,
+      S2: P - 0.618 * range,
+      S3: P - range,
+    };
+  }
+  return {
+    P,
+    R1: 2 * P - b.low,
+    S1: 2 * P - b.high,
+    R2: P + range,
+    S2: P - range,
+    R3: b.high + 2 * (P - b.low),
+    S3: b.low - 2 * (b.high - P),
+  };
+}
+
+// ZigZag: pivots where price reverses by ≥ deviation%. Returns {i, price} points.
+function computeZigZag(cs: Candle[], deviation = 5): Array<{ i: number; p: number }> {
+  if (cs.length < 3) return [];
+  const pts: Array<{ i: number; p: number }> = [];
+  let lastPivotIdx = 0;
+  let lastPivot = cs[0].close;
+  let dir = 0; // 1 up, -1 down
+  pts.push({ i: 0, p: cs[0].close });
+  for (let i = 1; i < cs.length; i++) {
+    const hi = cs[i].high;
+    const lo = cs[i].low;
+    const upMove = ((hi - lastPivot) / lastPivot) * 100;
+    const downMove = ((lastPivot - lo) / lastPivot) * 100;
+    if (dir >= 0 && downMove >= deviation) {
+      pts.push({ i, p: lo });
+      lastPivot = lo;
+      lastPivotIdx = i;
+      dir = -1;
+    } else if (dir <= 0 && upMove >= deviation) {
+      pts.push({ i, p: hi });
+      lastPivot = hi;
+      lastPivotIdx = i;
+      dir = 1;
+    } else if (dir === 1 && hi > lastPivot) {
+      lastPivot = hi;
+      pts[pts.length - 1] = { i, p: hi };
+    } else if (dir === -1 && lo < lastPivot) {
+      lastPivot = lo;
+      pts[pts.length - 1] = { i, p: lo };
+    }
+  }
+  void lastPivotIdx;
+  return pts;
+}
+
 // Compact volume formatting: 12.3M, 4.5K, etc.
 function fmtVol(n: number): string {
   const abs = Math.abs(n);
@@ -501,6 +795,15 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     priceScale = "linear",
     indicators = [],
     bollinger = false,
+    maType = "sma",
+    ichimoku = false,
+    psar = false,
+    supertrend = false,
+    keltner = false,
+    donchian = false,
+    pivots = "off",
+    linreg = false,
+    zigzag = false,
     indicatorSettings,
     symbol,
     compare,
@@ -551,6 +854,15 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   const priceScaleRef = React.useRef<PriceScale>(priceScale);
   const indicatorsRef = React.useRef<Indicator[]>(indicators);
   const bollingerRef = React.useRef<boolean>(bollinger);
+  const maTypeRef = React.useRef<MaType>(maType);
+  const ichimokuRef = React.useRef<boolean>(ichimoku);
+  const psarRef = React.useRef<boolean>(psar);
+  const supertrendRef = React.useRef<boolean>(supertrend);
+  const keltnerRef = React.useRef<boolean>(keltner);
+  const donchianRef = React.useRef<boolean>(donchian);
+  const pivotsRef = React.useRef<"off" | "std" | "fib">(pivots);
+  const linregRef = React.useRef<boolean>(linreg);
+  const zigzagRef = React.useRef<boolean>(zigzag);
   const settingsRef = React.useRef<IndicatorSettings>({
     ...DEFAULT_INDICATOR_SETTINGS,
     ...indicatorSettings,
@@ -1818,7 +2130,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       const periods = masRef.current;
       if (periods.length > 0) {
         for (let mi = 0; mi < periods.length; mi++) {
-          const series = computeSMA(cs, periods[mi]);
+          const series = computeMA(cs, periods[mi], maTypeRef.current);
           ctx.strokeStyle = pal.ma[mi % pal.ma.length];
           ctx.lineWidth = 1.5;
           ctx.lineJoin = "round";
@@ -1871,6 +2183,274 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           ctx.stroke();
         }
         ctx.setLineDash([]);
+      }
+
+      // ── TradingView-parity overlays (inside the price clip) ──
+      const strokeLine = (series: Series, color: string, width = 1.5, dash: number[] = []) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.lineJoin = "round";
+        ctx.setLineDash(dash);
+        ctx.beginPath();
+        let st = false;
+        for (let i = drawFrom; i <= drawTo; i++) {
+          const val = series[i];
+          if (val == null) {
+            st = false;
+            continue;
+          }
+          const x = xForIndex(i + 0.5);
+          const y = yForPrice(val);
+          if (!st) {
+            ctx.moveTo(x, y);
+            st = true;
+          } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      };
+      // fill the band between two same-length series (visible window)
+      const fillBand = (a: Series, b: Series, color: string) => {
+        ctx.beginPath();
+        let started = false;
+        for (let i = drawFrom; i <= drawTo; i++) {
+          const av = a[i];
+          if (av == null) continue;
+          const x = xForIndex(i + 0.5);
+          const y = yForPrice(av);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else ctx.lineTo(x, y);
+        }
+        for (let i = drawTo; i >= drawFrom; i--) {
+          const bv = b[i];
+          if (bv == null) continue;
+          ctx.lineTo(xForIndex(i + 0.5), yForPrice(bv));
+        }
+        if (started) {
+          ctx.closePath();
+          ctx.fillStyle = color;
+          ctx.fill();
+        }
+      };
+
+      if (donchianRef.current) {
+        const dc = computeDonchian(cs, 20);
+        fillBand(dc.upper, dc.lower, toRgba(pal.ma[1], 0.06));
+        strokeLine(dc.upper, pal.ma[1], 1);
+        strokeLine(dc.lower, pal.ma[1], 1);
+        strokeLine(dc.mid, pal.ma[1], 1, [4, 3]);
+      }
+      if (keltnerRef.current) {
+        const kc = computeKeltner(cs, 20, 10, 2);
+        fillBand(kc.upper, kc.lower, toRgba(pal.ma[0], 0.06));
+        strokeLine(kc.upper, pal.ma[0], 1);
+        strokeLine(kc.lower, pal.ma[0], 1);
+        strokeLine(kc.mid, pal.ma[0], 1, [4, 3]);
+      }
+      if (ichimokuRef.current) {
+        const ich = computeIchimoku(cs);
+        const disp = ich.displacement;
+        // forward-displaced cloud between spanA and spanB
+        const xAt = (i: number) => xForIndex(i + disp + 0.5);
+        const from2 = Math.max(0, Math.floor(v.from) - disp);
+        const to2 = Math.min(cs.length - 1, Math.ceil(v.to));
+        for (let pass = 0; pass < 1; pass++) {
+          ctx.beginPath();
+          let st = false;
+          for (let i = from2; i <= to2; i++) {
+            const a = ich.spanA[i];
+            if (a == null) continue;
+            const x = xAt(i);
+            const y = yForPrice(a);
+            if (!st) {
+              ctx.moveTo(x, y);
+              st = true;
+            } else ctx.lineTo(x, y);
+          }
+          for (let i = to2; i >= from2; i--) {
+            const b = ich.spanB[i];
+            if (b == null) continue;
+            ctx.lineTo(xAt(i), yForPrice(b));
+          }
+          if (st) {
+            ctx.closePath();
+            const aLast = ich.spanA[to2] ?? 0;
+            const bLast = ich.spanB[to2] ?? 0;
+            ctx.fillStyle = toRgba((aLast ?? 0) >= (bLast ?? 0) ? pal.up : pal.down, 0.1);
+            ctx.fill();
+          }
+        }
+        const dispLine = (series: Series, color: string, dash: number[] = []) => {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.lineJoin = "round";
+          ctx.setLineDash(dash);
+          ctx.beginPath();
+          let st = false;
+          for (let i = from2; i <= to2; i++) {
+            const val = series[i];
+            if (val == null) {
+              st = false;
+              continue;
+            }
+            const x = xAt(i);
+            const y = yForPrice(val);
+            if (!st) {
+              ctx.moveTo(x, y);
+              st = true;
+            } else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+        };
+        dispLine(ich.spanA, toRgba(pal.up, 0.6));
+        dispLine(ich.spanB, toRgba(pal.down, 0.6));
+        strokeLine(ich.tenkan, pal.ma[1], 1);
+        strokeLine(ich.kijun, pal.ma[0], 1);
+        // chikou (lagging close, displaced back)
+        ctx.strokeStyle = toRgba(pal.legendLabel, 1);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        let cst = false;
+        for (let i = Math.max(disp, drawFrom); i <= drawTo; i++) {
+          const x = xForIndex(i - disp + 0.5);
+          const y = yForPrice(cs[i].close);
+          if (!cst) {
+            ctx.moveTo(x, y);
+            cst = true;
+          } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      if (supertrendRef.current) {
+        const st = computeSupertrend(cs, 10, 3);
+        ctx.lineWidth = 2;
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        let prevDir: number | null = null;
+        let started = false;
+        for (let i = drawFrom; i <= drawTo; i++) {
+          const val = st.line[i];
+          const d = st.dir[i];
+          if (val == null || d == null) {
+            started = false;
+            prevDir = null;
+            continue;
+          }
+          if (prevDir !== null && d !== prevDir) {
+            ctx.stroke();
+            ctx.beginPath();
+            started = false;
+          }
+          ctx.strokeStyle = d === 1 ? pal.up : pal.down;
+          const x = xForIndex(i + 0.5);
+          const y = yForPrice(val);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else ctx.lineTo(x, y);
+          prevDir = d;
+        }
+        ctx.stroke();
+      }
+      if (psarRef.current) {
+        const sar = computePSAR(cs);
+        for (let i = drawFrom; i <= drawTo; i++) {
+          const val = sar[i];
+          if (val == null) continue;
+          const x = xForIndex(i + 0.5);
+          const y = yForPrice(val);
+          ctx.fillStyle = val > cs[i].close ? pal.down : pal.up;
+          ctx.beginPath();
+          ctx.arc(x, y, 1.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      if (zigzagRef.current) {
+        const zz = computeZigZag(cs, 5);
+        ctx.strokeStyle = pal.ma[2] ?? pal.chipBg;
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        let st = false;
+        for (const pt of zz) {
+          const x = xForIndex(pt.i + 0.5);
+          const y = yForPrice(pt.p);
+          if (!st) {
+            ctx.moveTo(x, y);
+            st = true;
+          } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      if (linregRef.current) {
+        // linear regression over the visible window + ±2σ residual channel
+        const a = Math.max(0, Math.floor(v.from));
+        const b = Math.min(cs.length - 1, Math.ceil(v.to));
+        const n = b - a + 1;
+        if (n >= 2) {
+          let sx = 0;
+          let sy = 0;
+          let sxy = 0;
+          let sxx = 0;
+          for (let i = a; i <= b; i++) {
+            const xi = i - a;
+            sx += xi;
+            sy += cs[i].close;
+            sxy += xi * cs[i].close;
+            sxx += xi * xi;
+          }
+          const denom = n * sxx - sx * sx;
+          const slope = denom ? (n * sxy - sx * sy) / denom : 0;
+          const intercept = (sy - slope * sx) / n;
+          let ss = 0;
+          for (let i = a; i <= b; i++) {
+            const fit = intercept + slope * (i - a);
+            ss += (cs[i].close - fit) ** 2;
+          }
+          const sigma = Math.sqrt(ss / n);
+          const lineAt = (i: number) => intercept + slope * (i - a);
+          const drawReg = (off: number, dash: number[]) => {
+            ctx.strokeStyle = pal.chipBg;
+            ctx.lineWidth = 1;
+            ctx.setLineDash(dash);
+            ctx.beginPath();
+            ctx.moveTo(xForIndex(a + 0.5), yForPrice(lineAt(a) + off));
+            ctx.lineTo(xForIndex(b + 0.5), yForPrice(lineAt(b) + off));
+            ctx.stroke();
+            ctx.setLineDash([]);
+          };
+          drawReg(2 * sigma, [4, 3]);
+          drawReg(0, []);
+          drawReg(-2 * sigma, [4, 3]);
+        }
+      }
+      if (pivotsRef.current !== "off") {
+        const pv = computePivots(cs, pivotsRef.current === "fib");
+        if (pv) {
+          ctx.setLineDash([]);
+          for (const name of Object.keys(pv)) {
+            const price = pv[name];
+            const y = yForPrice(price);
+            if (y < L.priceTop || y > L.priceBottom) continue;
+            const isP = name === "P";
+            ctx.strokeStyle = isP
+              ? pal.chipBg
+              : name.startsWith("R")
+              ? toRgba(pal.down, 0.6)
+              : toRgba(pal.up, 0.6);
+            ctx.lineWidth = isP ? 1.2 : 1;
+            ctx.beginPath();
+            ctx.moveTo(L.left, Math.round(y) + 0.5);
+            ctx.lineTo(L.right, Math.round(y) + 0.5);
+            ctx.stroke();
+            ctx.fillStyle = pal.legendLabel;
+            ctx.textAlign = "left";
+            ctx.fillText(name, L.left + 4, y - 4);
+          }
+        }
       }
 
       // ── session VWAP overlay (dashed) ──
@@ -2384,8 +2964,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           return null;
         };
         for (let mi = 0; mi < maPeriods.length; mi++) {
-          const lastVal = lastOf(computeSMA(cs, maPeriods[mi]));
-          const label = `MA${maPeriods[mi]}`;
+          const lastVal = lastOf(computeMA(cs, maPeriods[mi], maTypeRef.current));
+          const label = `${maTypeRef.current === "sma" ? "MA" : maTypeRef.current.toUpperCase()}${maPeriods[mi]}`;
           const valText = lastVal != null ? ` ${fmtPrice(lastVal)}` : "";
           ctx.fillStyle = pal.ma[mi % pal.ma.length];
           ctx.fillText(label + valText, mlx, mly);
@@ -3308,6 +3888,15 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     priceScaleRef.current = priceScale;
     indicatorsRef.current = indicators;
     bollingerRef.current = bollinger;
+    maTypeRef.current = maType;
+    ichimokuRef.current = ichimoku;
+    psarRef.current = psar;
+    supertrendRef.current = supertrend;
+    keltnerRef.current = keltner;
+    donchianRef.current = donchian;
+    pivotsRef.current = pivots;
+    linregRef.current = linreg;
+    zigzagRef.current = zigzag;
     settingsRef.current = { ...DEFAULT_INDICATOR_SETTINGS, ...indicatorSettings };
     symbolRef.current = symbol;
     compareRef.current = compare;
@@ -3361,7 +3950,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       lastPriceRef.current = newPrice;
     }
     api?.schedule();
-  }, [candles, interval, currency, range, chartType, showVolume, mas, emas, ribbon, crosses, priceScale, indicators, bollinger, indicatorSettings, symbol, compare, events, vwap, volumeProfile, dataWindow, replayIndex, onExitReplay, onToggleFullscreen, onToggleDataWindow, onToggleHelp, displayStartTime]);
+  }, [candles, interval, currency, range, chartType, showVolume, mas, emas, ribbon, crosses, priceScale, indicators, bollinger, maType, ichimoku, psar, supertrend, keltner, donchian, pivots, linreg, zigzag, indicatorSettings, symbol, compare, events, vwap, volumeProfile, dataWindow, replayIndex, onExitReplay, onToggleFullscreen, onToggleDataWindow, onToggleHelp, displayStartTime]);
 
   return (
     <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>
