@@ -1050,6 +1050,8 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
   // imperative pointer handlers read).
   const [tool, setTool] = React.useState<DrawTool>("cursor");
   const toolRef = React.useRef<DrawTool>("cursor");
+  const setToolRef = React.useRef(setTool); // bridge for closures to switch tools
+  setToolRef.current = setTool;
   React.useEffect(() => {
     toolRef.current = tool;
     const c = canvasRef.current;
@@ -1324,6 +1326,10 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     let drawings: Drawing[] = [];
     let pending: { type: Drawing["type"]; points: Array<{ t: number; p: number }> } | null = null;
     const pendingCursor = { x: 0, y: 0 };
+    // Press-drag-release placement (fib/rect/trend/ray/arrow) — TradingView style.
+    let placing:
+      | { type: Drawing["type"]; p1: { t: number; p: number }; cur: { t: number; p: number }; x0: number; y0: number }
+      | null = null;
     // manual (locked) vertical price scale; null = auto-fit to the visible range
     let manualScale: { lo: number; hi: number } | null = null;
     let axisDrag: { startY: number; lo: number; hi: number } | null = null;
@@ -1540,13 +1546,28 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       return null;
     };
     // screen position of a drawing's editable handle #i
+    // Rectangles expose all 4 corners as handles (0=p0, 1=p1, 2=(p0.t,p1.p),
+    // 3=(p1.t,p0.p)); other shapes expose their stored points.
+    const handleCount = (d: Drawing): number =>
+      d.type === "rect" ? 4 : d.type === "hline" || d.type === "alert" ? 1 : d.points.length;
     const handlePos = (d: Drawing, i: number): { x: number; y: number } => {
       if (d.type === "hline" || d.type === "alert") return { x: layout().right - 8, y: priceToY(d.points[0].p) };
+      if (d.type === "rect" && d.points.length === 2) {
+        const corners = [
+          { t: d.points[0].t, p: d.points[0].p },
+          { t: d.points[1].t, p: d.points[1].p },
+          { t: d.points[0].t, p: d.points[1].p },
+          { t: d.points[1].t, p: d.points[0].p },
+        ];
+        const c = corners[i] ?? corners[0];
+        return { x: timeToXc(c.t), y: priceToY(c.p) };
+      }
       return { x: timeToXc(d.points[i].t), y: priceToY(d.points[i].p) };
     };
     // which handle of a drawing is under (x,y), or null
     const handleAt = (d: Drawing, x: number, y: number): number | null => {
-      for (let i = 0; i < d.points.length; i++) {
+      const n = handleCount(d);
+      for (let i = 0; i < n; i++) {
         const h = handlePos(d, i);
         if (Math.hypot(x - h.x, y - h.y) <= 7) return i;
       }
@@ -2879,8 +2900,80 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         ctx.stroke();
       }
 
+      // Shared shape renderers (used by committed drawings AND the live preview).
+      const drawRectShape = (pts: Array<{ t: number; p: number }>, col: string, sel: boolean) => {
+        const x1 = timeToXc(pts[0].t);
+        const x2 = timeToXc(pts[1].t);
+        const y1 = priceToY(pts[0].p);
+        const y2 = priceToY(pts[1].p);
+        const rx = Math.min(x1, x2);
+        const ry = Math.min(y1, y2);
+        const rw = Math.abs(x2 - x1);
+        const rh = Math.abs(y2 - y1);
+        ctx.strokeStyle = col;
+        ctx.lineWidth = sel ? 2.5 : 1.5;
+        ctx.fillStyle = toRgba(col, 0.1);
+        ctx.fillRect(rx, ry, rw, rh);
+        ctx.strokeRect(Math.round(rx) + 0.5, Math.round(ry) + 0.5, rw, rh);
+        const hiP = Math.max(pts[0].p, pts[1].p);
+        const loP = Math.min(pts[0].p, pts[1].p);
+        const pct = loP ? ((hiP - loP) / loP) * 100 : 0;
+        const bars = Math.abs(Math.round(indexForX(x2)) - Math.round(indexForX(x1)));
+        ctx.fillStyle = pal.legendLabel;
+        ctx.textAlign = "left";
+        ctx.fillText(`${fmtPrice(hiP - loP)} · ${pct.toFixed(2)}% · ${bars}b`, rx + 4, ry - 5);
+      };
+      const FIB_KEY = new Set([0, 0.5, 0.618, 1]);
+      const drawFibShape = (pts: Array<{ t: number; p: number }>, col: string, sel: boolean) => {
+        const x1 = timeToXc(pts[0].t);
+        const x2 = timeToXc(pts[1].t);
+        const p1 = pts[0].p;
+        const p2 = pts[1].p;
+        const xa = Math.min(x1, x2);
+        const priceAt = (vv: number) => p1 + (p2 - p1) * vv;
+        const fibPx = Math.abs(priceToY(p1) - priceToY(p2));
+        const showLabels = fibPx > 60;
+        const gpA = priceToY(priceAt(0.382));
+        const gpB = priceToY(priceAt(0.618));
+        ctx.fillStyle = toRgba(col, 0.08);
+        ctx.fillRect(xa, Math.min(gpA, gpB), L.right - xa, Math.abs(gpB - gpA));
+        ctx.strokeStyle = col;
+        ctx.lineWidth = sel ? 2.5 : 1.5;
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath();
+        ctx.moveTo(x1, priceToY(p1));
+        ctx.lineTo(x2, priceToY(p2));
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        for (const vv of FIB_ALL) {
+          const price = priceAt(vv);
+          const y = priceToY(price);
+          const isExt = vv > 1;
+          const key = FIB_KEY.has(vv);
+          ctx.strokeStyle = col;
+          ctx.lineWidth = key ? 1.2 : 1;
+          ctx.globalAlpha = isExt ? 0.35 : key ? 0.85 : 0.5;
+          ctx.beginPath();
+          ctx.moveTo(xa, Math.round(y) + 0.5);
+          ctx.lineTo(L.right, Math.round(y) + 0.5);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          if (showLabels) {
+            const dpct = p1 ? (price / p1 - 1) * 100 : 0;
+            ctx.fillStyle = pal.legendLabel;
+            ctx.textAlign = "right";
+            ctx.fillText(
+              `${(vv * 100).toFixed(1)}%  ${fmtPrice(price)}  ${dpct >= 0 ? "+" : ""}${dpct.toFixed(2)}%`,
+              L.right - 2,
+              y - 5
+            );
+            ctx.textAlign = "left";
+          }
+        }
+      };
+
       // ── user drawings (hline / trend / fib) — inside the price clip ──
-      if (drawings.length > 0 || pending) {
+      if (drawings.length > 0 || pending || placing) {
         ctx.lineJoin = "round";
         ctx.setLineDash([]);
         for (const d of drawings) {
@@ -2964,23 +3057,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
               ctx.stroke();
             }
           } else if (d.type === "rect" && d.points.length === 2) {
-            const x1 = timeToXc(d.points[0].t);
-            const x2 = timeToXc(d.points[1].t);
-            const y1 = priceToY(d.points[0].p);
-            const y2 = priceToY(d.points[1].p);
-            const rx = Math.min(x1, x2);
-            const ry = Math.min(y1, y2);
-            const rw = Math.abs(x2 - x1);
-            const rh = Math.abs(y2 - y1);
-            ctx.fillStyle = toRgba(col, 0.1);
-            ctx.fillRect(rx, ry, rw, rh);
-            ctx.strokeRect(Math.round(rx) + 0.5, Math.round(ry) + 0.5, rw, rh);
-            const hiP = Math.max(d.points[0].p, d.points[1].p);
-            const loP = Math.min(d.points[0].p, d.points[1].p);
-            const pct = loP ? ((hiP - loP) / loP) * 100 : 0;
-            ctx.fillStyle = pal.legendLabel;
-            ctx.textAlign = "left";
-            ctx.fillText(`${fmtPrice(hiP - loP)}  ${pct.toFixed(2)}%`, rx + 4, ry - 5);
+            drawRectShape(d.points, col, sel);
           } else if ((d.type === "long" || d.type === "short") && d.points.length === 3) {
             const entry = d.points[0].p;
             const stop = d.points[1].p;
@@ -3059,60 +3136,14 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
             ctx.stroke();
             void x2;
           } else if (d.type === "fib" && d.points.length === 2) {
-            const x1 = timeToXc(d.points[0].t);
-            const x2 = timeToXc(d.points[1].t);
-            const p1 = d.points[0].p;
-            const p2 = d.points[1].p;
-            const xa = Math.min(x1, x2);
-            const priceAt = (v: number) => p1 + (p2 - p1) * v;
-            const fibPx = Math.abs(priceToY(p1) - priceToY(p2));
-            const showLabels = fibPx > 60; // skip labels when too compressed
-            // golden pocket (0.382–0.618) shaded across the forward span
-            const gpA = priceToY(priceAt(0.382));
-            const gpB = priceToY(priceAt(0.618));
-            ctx.fillStyle = toRgba(col, 0.08);
-            ctx.fillRect(xa, Math.min(gpA, gpB), L.right - xa, Math.abs(gpB - gpA));
-            // anchor segment (the move itself)
-            ctx.strokeStyle = col;
-            ctx.lineWidth = sel ? 2.5 : 1.5;
-            ctx.globalAlpha = 0.5;
-            ctx.beginPath();
-            ctx.moveTo(x1, priceToY(p1));
-            ctx.lineTo(x2, priceToY(p2));
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-            // levels (retracements solid-ish, extensions fainter), extend to right edge
-            for (const v of FIB_ALL) {
-              const price = priceAt(v);
-              const y = priceToY(price);
-              const isExt = v > 1;
-              ctx.strokeStyle = col;
-              ctx.lineWidth = 1;
-              ctx.globalAlpha = isExt ? 0.4 : 0.7;
-              ctx.beginPath();
-              ctx.moveTo(xa, Math.round(y) + 0.5);
-              ctx.lineTo(L.right, Math.round(y) + 0.5);
-              ctx.stroke();
-              ctx.globalAlpha = 1;
-              if (showLabels) {
-                const dpct = p1 ? (price / p1 - 1) * 100 : 0;
-                ctx.fillStyle = pal.legendLabel;
-                ctx.textAlign = "right";
-                ctx.fillText(
-                  `${(v * 100).toFixed(1)}%  ${fmtPrice(price)}  ${dpct >= 0 ? "+" : ""}${dpct.toFixed(2)}%`,
-                  L.right - 2,
-                  y - 5
-                );
-                ctx.textAlign = "left";
-              }
-            }
+            drawFibShape(d.points, col, sel);
           }
           // selection handles
           if (sel) {
             ctx.fillStyle = col;
             ctx.strokeStyle = pal.onColorText;
             ctx.lineWidth = 1;
-            for (let i = 0; i < d.points.length; i++) {
+            for (let i = 0; i < handleCount(d); i++) {
               const h = handlePos(d, i);
               ctx.beginPath();
               ctx.rect(h.x - 3.5, h.y - 3.5, 7, 7);
@@ -3130,6 +3161,28 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           ctx.lineTo(pendingCursor.x, pendingCursor.y);
           ctx.stroke();
           ctx.setLineDash([]);
+        }
+        // live drag-to-draw preview (fib/rect via shared renderers; others a line)
+        if (placing) {
+          const pts = [placing.p1, placing.cur];
+          ctx.globalAlpha = 0.85;
+          if (placing.type === "rect") drawRectShape(pts, pal.chipBg, false);
+          else if (placing.type === "fib") drawFibShape(pts, pal.chipBg, false);
+          else {
+            ctx.strokeStyle = pal.chipBg;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            const x1 = timeToXc(placing.p1.t);
+            const y1 = priceToY(placing.p1.p);
+            const x2 = timeToXc(placing.cur.t);
+            const y2 = priceToY(placing.cur.p);
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+          ctx.globalAlpha = 1;
         }
       }
       ctx.restore();
@@ -3798,8 +3851,16 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           schedule();
           return;
         }
-        // multi-click tools: trend/fib/ray/arrow/rect (2), channel (3)
-        const needed = dt === "channel" ? 3 : 2;
+        // 2-point tools draw by press-drag-release (fib/rect/trend/ray/arrow)
+        if (dt === "fib" || dt === "rect" || dt === "trend" || dt === "ray" || dt === "arrow") {
+          const pt = placePoint(px, py, true);
+          placing = { type: dt as Drawing["type"], p1: pt, cur: pt, x0: px, y0: py };
+          drag.on = false;
+          crosshair.on = false;
+          schedule();
+          return;
+        }
+        // channel still uses click-to-place (3 points)
         const snapped = placePoint(px, py, true);
         if (!pending) {
           pending = { type: dt as Drawing["type"], points: [snapped] };
@@ -3807,7 +3868,7 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           pendingCursor.y = py;
         } else {
           pending.points.push(snapped);
-          if (pending.points.length >= needed) {
+          if (pending.points.length >= 3) {
             drawings.push({ id: genDrawId(), type: pending.type, points: pending.points });
             pending = null;
             saveDrawings();
@@ -3918,10 +3979,30 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
           } else if (d.type === "long" || d.type === "short") {
             // position handles move vertically only (keep the entry time)
             d.points[editDrag.handle] = { t: d.points[editDrag.handle].t, p: yToPrice(y) };
+          } else if (d.type === "rect") {
+            // 4 corner handles map back to the two stored corners
+            const t = xToTime(x);
+            const p = yToPrice(y);
+            const h = editDrag.handle;
+            if (h === 0) d.points[0] = { t, p };
+            else if (h === 1) d.points[1] = { t, p };
+            else if (h === 2) {
+              d.points[0] = { t, p: d.points[0].p };
+              d.points[1] = { t: d.points[1].t, p };
+            } else if (h === 3) {
+              d.points[1] = { t, p: d.points[1].p };
+              d.points[0] = { t: d.points[0].t, p };
+            }
           } else {
             d.points[editDrag.handle] = { t: xToTime(x), p: yToPrice(y) };
           }
         }
+        schedule();
+        return;
+      }
+
+      if (placing) {
+        placing.cur = placePoint(x, y, true);
         schedule();
         return;
       }
@@ -3963,6 +4044,18 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
       if (pointers.size === 0) {
         drag.on = false;
         axisDrag = null;
+        if (placing) {
+          const moved = Math.abs(relX(e.clientX) - placing.x0) > 4 || Math.abs(relY(e.clientY) - placing.y0) > 4;
+          if (moved) {
+            const id = genDrawId();
+            drawings.push({ id, type: placing.type, points: [placing.p1, placing.cur] });
+            selectedId = id;
+            saveDrawings();
+            setToolRef.current?.("cursor"); // return to cursor (TradingView default)
+          }
+          placing = null;
+          schedule();
+        }
         if (editDrag) {
           editDrag = null;
           saveDrawings();
@@ -4140,6 +4233,9 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
         case "Escape":
           if (replayIndexRef.current != null) {
             onExitReplayRef.current?.();
+          } else if (placing) {
+            placing = null;
+            schedule();
           } else if (pending) {
             pending = null;
             schedule();
