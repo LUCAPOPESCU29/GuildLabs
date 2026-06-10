@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getBaseUrl } from "@/lib/base-url";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const params = new URLSearchParams({
     client_id: process.env.DISCORD_CLIENT_ID!,
-    redirect_uri: `${process.env.NEXTAUTH_URL}/api/auth/callback`,
+    redirect_uri: `${getBaseUrl(req)}/api/auth/callback`,
     response_type: "code",
     scope: "identify guilds",
   });

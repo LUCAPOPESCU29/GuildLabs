@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSession } from "@/lib/session";
 import { cookies } from "next/headers";
+import { getBaseUrl } from "@/lib/base-url";
 
 export async function GET(req: NextRequest) {
+  const base = getBaseUrl(req);
   const code = req.nextUrl.searchParams.get("code");
-  if (!code) return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/dashboard?error=no_code`);
+  if (!code) return NextResponse.redirect(`${base}/dashboard?error=no_code`);
 
   // Exchange code for token
   const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
@@ -15,13 +17,13 @@ export async function GET(req: NextRequest) {
       client_secret: process.env.DISCORD_CLIENT_SECRET!,
       grant_type: "authorization_code",
       code,
-      redirect_uri: `${process.env.NEXTAUTH_URL}/api/auth/callback`,
+      redirect_uri: `${base}/api/auth/callback`,
     }),
   });
 
   const tokenData = await tokenRes.json();
   if (!tokenData.access_token) {
-    return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/dashboard?error=token_failed`);
+    return NextResponse.redirect(`${base}/dashboard?error=token_failed`);
   }
 
   // Get user info
@@ -48,5 +50,5 @@ export async function GET(req: NextRequest) {
     path: "/",
   });
 
-  return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/dashboard`);
+  return NextResponse.redirect(`${base}/dashboard`);
 }
