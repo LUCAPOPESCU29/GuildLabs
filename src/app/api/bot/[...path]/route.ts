@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BOT_API = process.env.BOT_API_URL ?? "http://localhost:3008";
-const BOT_KEY = process.env.BOT_API_KEY ?? "forge-local-dev";
+// Use `||` (not `??`) so an empty-string env var falls back instead of
+// producing a host-less URL that throws on fetch.
+const BOT_API = (process.env.BOT_API_URL || "http://localhost:3008").replace(/\/+$/, "");
+const BOT_KEY = process.env.BOT_API_KEY || "forge-local-dev";
 
 async function proxy(req: NextRequest, path: string[]) {
   const url = `${BOT_API}/${path.join("/")}`;
