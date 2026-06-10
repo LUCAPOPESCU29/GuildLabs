@@ -37,10 +37,17 @@ async function fetchMe(): Promise<User | null> {
   return r.json();
 }
 
-async function fetchGuilds(): Promise<Guild[]> {
+type GuildsResult =
+  | { ok: true; guilds: Guild[] }
+  | { ok: false; code: "reauth" | "bot_offline" | "discord_down" | "unknown"; error: string };
+
+async function fetchGuilds(): Promise<GuildsResult> {
   const r = await fetch("/api/me/guilds", { cache: "no-store" });
-  const d = await r.json().catch(() => []);
-  return Array.isArray(d) ? d : [];
+  const d = await r.json().catch(() => null);
+  if (r.ok && Array.isArray(d)) return { ok: true, guilds: d };
+  const code = (d && typeof d === "object" && d.code) || "unknown";
+  const error = (d && typeof d === "object" && d.error) || "Couldn't load your servers.";
+  return { ok: false, code, error };
 }
 
 async function deployBlueprint(guild: Guild, blueprint: unknown): Promise<DeployResult> {
@@ -108,7 +115,8 @@ export function DeployDialog({
   // ── Derived view state ───────────────────────────────────────────────────
   const auth: AuthState = meQuery.isLoading ? "loading" : meQuery.data ? "authed" : "anonymous";
   const user = meQuery.data ?? null;
-  const guilds = guildsQuery.data ?? [];
+  const guildsResult = guildsQuery.data ?? null;
+  const guildsLoading = guildsQuery.isLoading && !!meQuery.data;
   const chosen = deployMutation.variables ?? null;
   const result = deployMutation.data ?? null;
   const stage: Stage = deployMutation.isPending
@@ -171,9 +179,11 @@ export function DeployDialog({
               <PickerStage
                 auth={auth}
                 user={user}
-                guilds={guilds}
+                guildsResult={guildsResult}
+                guildsLoading={guildsLoading}
                 onPick={(g) => deployMutation.mutate(g)}
                 onLogin={loginAndReturn}
+                onRefetch={() => guildsQuery.refetch()}
                 inviteUrl={INVITE_URL(clientId)}
               />
             )}
@@ -206,19 +216,23 @@ export function DeployDialog({
 function PickerStage({
   auth,
   user,
-  guilds,
+  guildsResult,
+  guildsLoading,
   onPick,
   onLogin,
+  onRefetch,
   inviteUrl,
 }: {
   auth: AuthState;
   user: User | null;
-  guilds: Guild[];
+  guildsResult: GuildsResult | null;
+  guildsLoading: boolean;
   onPick: (g: Guild) => void;
   onLogin: () => void;
+  onRefetch: () => void;
   inviteUrl: string;
 }) {
-  if (auth === "loading") {
+  if (auth === "loading" || (auth === "authed" && (guildsLoading || !guildsResult))) {
     return (
       <div className="py-2" aria-busy="true" aria-label="Loading your servers">
         <Skeleton className="h-7 w-48" />
@@ -247,12 +261,42 @@ function PickerStage({
     );
   }
 
+  if (!guildsResult) return null; // covered by the loading guard above
+
+  // Session needs refreshing — token expired or predates the `guilds` scope.
+  if (!guildsResult.ok && guildsResult.code === "reauth") {
+    return (
+      <div className="py-4">
+        <h2 className="font-display text-2xl font-black">Reconnect your Discord</h2>
+        <p className="mt-2 text-muted-foreground">
+          Your sign-in needs refreshing so we can see which servers you manage. This takes a second.
+        </p>
+        <DiscordLoginButton onClick={onLogin} className="mt-6" />
+      </div>
+    );
+  }
+
+  // Bot or Discord temporarily unreachable — NOT a "please invite the bot" case.
+  if (!guildsResult.ok) {
+    return (
+      <div className="py-4">
+        <h2 className="font-display text-2xl font-black">Couldn&apos;t load your servers</h2>
+        <p className="mt-2 text-muted-foreground">{guildsResult.error}</p>
+        <Button size="lg" onClick={onRefetch} className="mt-6 w-full">
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  const guilds = guildsResult.guilds;
+
   if (guilds.length === 0) {
     return (
       <div className="py-4">
         <h2 className="font-display text-2xl font-black">Add GuildLabs first</h2>
         <p className="mt-2 text-muted-foreground">
-          The bot isn&apos;t in any of your servers yet. Invite it (Administrator permission) and come back.
+          The bot isn&apos;t in any server you manage yet. Invite it (Administrator permission) and come back.
         </p>
         <a
           href={inviteUrl}

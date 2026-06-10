@@ -30,7 +30,50 @@ import { Showcase } from "@/components/sections/showcase";
 import { TickerSearch } from "@/components/ticker-search";
 import { TickerMarquee } from "@/components/ticker-marquee";
 import { AnimatedHeading } from "@/components/motion/animated-heading";
+import { SpotlightCard } from "@/components/fx/spotlight-card";
+import { CountUp } from "@/components/motion/count-up";
 import Link from "next/link";
+
+type Bot = {
+  name: string;
+  href: string;
+  glow: string;
+  icon: React.ComponentType<{ className?: string }>;
+  body: string;
+};
+
+const BOTS: Bot[] = [
+  {
+    name: "Construct",
+    href: "/bots/construct",
+    glow: "var(--primary)",
+    icon: Boxes,
+    body: "Deploys your blueprint into a live server: roles, categories, channels, permissions, set up right the first time.",
+  },
+  {
+    name: "Maven",
+    href: "/bots/maven",
+    glow: "var(--accent)",
+    icon: BookOpen,
+    body: "Surfaces the answer when a question's been asked before. Runs on a local model — no API keys, no per-message cost.",
+  },
+  {
+    name: "ChartIt",
+    href: "/bots/chartit",
+    glow: "var(--coral)",
+    icon: LineChart,
+    body: "Live stock and crypto charts in Discord. One slash command pulls the quote and renders the chart.",
+  },
+];
+
+type Stat = { value: number; format?: (n: number) => string; label: string };
+
+const STATS: Stat[] = [
+  { value: 3, label: "Free, open-source bots" },
+  { value: 4, label: "Taps to a live server" },
+  { value: 0, format: (n) => `$${Math.round(n)}`, label: "Forever — no premium tier" },
+  { value: 100, format: (n) => `${Math.round(n)}%`, label: "Source on GitHub" },
+];
 
 const MARQUEE_TICKERS = [
   "AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "META", "GOOGL", "AMD",
@@ -200,18 +243,46 @@ export default function Home() {
                   body: "The Construct bot builds it in your server in seconds. Or download the blueprint as JSON and keep it.",
                 },
               ].map((s) => (
-                <div
+                <SpotlightCard
                   key={s.step}
-                  className="card-hover relative overflow-hidden rounded-3xl border-2 border-card-border bg-card p-6"
+                  className="card-hover rounded-3xl border-2 border-card-border bg-card p-6"
                 >
-                  <span className="font-mono text-6xl font-black leading-none tabular-nums text-primary/15">
+                  <span className="font-mono text-6xl font-black leading-none tabular-nums text-primary/15 transition-colors duration-300 group-hover:text-primary/30">
                     {s.step}
                   </span>
                   <h3 className="mt-3 font-display text-xl font-black">{s.title}</h3>
                   <p className="mt-2 text-sm text-muted-foreground">{s.body}</p>
-                </div>
+                </SpotlightCard>
               ))}
             </div>
+          </div>
+        </Reveal>
+      </section>
+
+      {/* stats band — honest, count-up on scroll */}
+      <section className="px-4 py-10">
+        <Reveal>
+          <div className="grain relative mx-auto grid max-w-6xl grid-cols-2 gap-px overflow-hidden rounded-[2rem] border-2 border-card-border bg-card-border lg:grid-cols-4">
+            {STATS.map((s, i) => (
+              <div
+                key={s.label}
+                className="group relative flex flex-col items-center justify-center bg-card px-4 py-10 text-center transition-colors hover:bg-primary/[0.04]"
+              >
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-0 top-0 h-px origin-left scale-x-0 bg-gradient-to-r from-transparent via-primary to-transparent transition-transform duration-500 group-hover:scale-x-100"
+                />
+                <CountUp
+                  value={s.value}
+                  format={s.format}
+                  duration={1.1 + i * 0.15}
+                  className="font-display text-5xl font-black tabular-nums text-foreground sm:text-6xl"
+                />
+                <span className="mt-2 max-w-[12rem] text-sm font-medium text-muted-foreground">
+                  {s.label}
+                </span>
+              </div>
+            ))}
           </div>
         </Reveal>
       </section>
@@ -336,45 +407,36 @@ export default function Home() {
               solves a single problem properly.
             </p>
             <div className="mt-10 grid gap-4 sm:grid-cols-3">
-              <Link href="/bots/construct" className="card-hover group rounded-3xl border-2 border-card-border bg-card p-6">
-                <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <Boxes className="size-5" />
-                </span>
-                <h3 className="mt-4 font-display text-xl font-black">Construct</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Deploys your blueprint into a live server: roles, categories, channels,
-                  permissions, set up right the first time.
-                </p>
-                <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-                  Learn more <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-              </Link>
-              <Link href="/bots/maven" className="card-hover group rounded-3xl border-2 border-card-border bg-card p-6">
-                <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <BookOpen className="size-5" />
-                </span>
-                <h3 className="mt-4 font-display text-xl font-black">Maven</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Surfaces the answer when a question&apos;s been asked before. Runs on a
-                  local model — no API keys, no per-message cost.
-                </p>
-                <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-                  Learn more <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-              </Link>
-              <Link href="/bots/chartit" className="card-hover group rounded-3xl border-2 border-card-border bg-card p-6">
-                <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <LineChart className="size-5" />
-                </span>
-                <h3 className="mt-4 font-display text-xl font-black">ChartIt</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Live stock and crypto charts in Discord. One slash command pulls the
-                  quote and renders the chart.
-                </p>
-                <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-                  Learn more <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-              </Link>
+              {BOTS.map((b) => {
+                const Icon = b.icon;
+                return (
+                  <SpotlightCard
+                    key={b.name}
+                    href={b.href}
+                    glow={b.glow}
+                    className="card-hover rounded-3xl border-2 border-card-border bg-card p-6"
+                  >
+                    <span
+                      className="grid size-11 place-items-center rounded-xl transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:scale-105"
+                      style={{
+                        background: `color-mix(in oklab, ${b.glow} 14%, transparent)`,
+                        color: b.glow,
+                      }}
+                    >
+                      <Icon className="size-5" />
+                    </span>
+                    <h3 className="mt-4 font-display text-xl font-black">{b.name}</h3>
+                    <p className="mt-2 text-sm text-muted-foreground">{b.body}</p>
+                    <span
+                      className="mt-4 inline-flex items-center gap-1 text-sm font-semibold"
+                      style={{ color: b.glow }}
+                    >
+                      Learn more{" "}
+                      <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+                    </span>
+                  </SpotlightCard>
+                );
+              })}
             </div>
           </div>
         </Reveal>

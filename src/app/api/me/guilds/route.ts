@@ -31,21 +31,31 @@ export async function GET() {
       headers: { Authorization: `Bearer ${session.accessToken}` },
       cache: "no-store",
     });
-    if (r.ok) {
-      const gs = await r.json();
-      if (Array.isArray(gs)) {
-        for (const g of gs) {
-          try {
-            const perms = BigInt(g.permissions ?? "0");
-            if (g.owner || (perms & (ADMINISTRATOR | MANAGE_GUILD)) !== ZERO) manageable.add(g.id);
-          } catch {
-            /* skip malformed permission strings */
-          }
+    if (!r.ok) {
+      // 401/403 → token expired or missing the `guilds` scope (e.g. a session
+      // created before the scope was added). Tell the client to re-auth rather
+      // than pretending the bot is missing from every server.
+      return NextResponse.json(
+        { error: "Your Discord session needs refreshing.", code: "reauth" },
+        { status: 401, headers: NO_STORE },
+      );
+    }
+    const gs = await r.json();
+    if (Array.isArray(gs)) {
+      for (const g of gs) {
+        try {
+          const perms = BigInt(g.permissions ?? "0");
+          if (g.owner || (perms & (ADMINISTRATOR | MANAGE_GUILD)) !== ZERO) manageable.add(g.id);
+        } catch {
+          /* skip malformed permission strings */
         }
       }
     }
   } catch {
-    /* Discord unreachable — fall through to empty intersection */
+    return NextResponse.json(
+      { error: "Couldn't reach Discord. Try again in a moment.", code: "discord_down" },
+      { status: 503, headers: NO_STORE },
+    );
   }
 
   // 2. Which guilds is the bot in?
@@ -54,7 +64,10 @@ export async function GET() {
     cache: "no-store",
   }).catch(() => null);
   if (!botRes || !botRes.ok) {
-    return NextResponse.json({ error: "Bot is offline." }, { status: 503, headers: NO_STORE });
+    return NextResponse.json(
+      { error: "The bot is offline. Try again shortly.", code: "bot_offline" },
+      { status: 503, headers: NO_STORE },
+    );
   }
   const botGuilds = await botRes.json().catch(() => []);
 
