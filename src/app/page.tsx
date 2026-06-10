@@ -12,6 +12,12 @@ import {
   LineChart,
   ShieldCheck,
   Download,
+  Bot,
+  Hash,
+  Volume2,
+  Wand2,
+  MessageCircleQuestion,
+  Rocket,
 } from "lucide-react";
 import { HeroScene } from "@/components/site/hero-scene";
 import { GuildLabsLogo } from "@/components/logo";
@@ -212,6 +218,110 @@ export default function Home() {
 
       {/* showcase — animated demos of how the bot is added & how features work */}
       <Showcase />
+
+      {/* playground promo */}
+      <section className="px-4 py-20">
+        <Reveal>
+          <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-2">
+            {/* copy */}
+            <div>
+              <SectionLabel tone="accent">New · Playground</SectionLabel>
+              <h2 className="mt-5 font-display text-5xl font-black leading-[0.95] tracking-tight sm:text-7xl text-balance">
+                Just <span className="hl">talk to the bot.</span>
+              </h2>
+              <p className="mt-5 max-w-md text-lg text-muted-foreground text-pretty">
+                Type a slash command and watch it happen — in a Discord-style chat. Build a whole
+                server, drop a live chart, or ask anything. No setup, right in your browser.
+              </p>
+
+              <div className="mt-7 flex flex-wrap gap-2">
+                {[
+                  { icon: Wand2, label: "/build", desc: "a server" },
+                  { icon: LineChart, label: "/chart", desc: "AAPL" },
+                  { icon: MessageCircleQuestion, label: "/ask", desc: "anything" },
+                ].map((c) => {
+                  const Icon = c.icon;
+                  return (
+                    <span
+                      key={c.label}
+                      className="inline-flex items-center gap-2 rounded-full border-2 border-card-border bg-card px-3.5 py-1.5 font-mono text-sm"
+                    >
+                      <Icon className="size-4 text-primary" />
+                      <span className="font-bold text-foreground">{c.label}</span>
+                      <span className="text-muted-foreground">{c.desc}</span>
+                    </span>
+                  );
+                })}
+              </div>
+
+              <div className="mt-8">
+                <Link href="/playground">
+                  <Button size="lg" magnetic>
+                    <Bot className="size-5" /> Open the playground <ArrowRight className="size-4" />
+                  </Button>
+                </Link>
+              </div>
+            </div>
+
+            {/* chat mock (Discord-style, forced dark) */}
+            <div className="dark">
+              <div className="glass-strong overflow-hidden rounded-3xl p-3">
+                <div className="rounded-2xl bg-background-deep/80 p-4">
+                  {/* user */}
+                  <div className="flex gap-3">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted font-display text-xs font-bold text-foreground">
+                      You
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-display text-sm font-bold text-foreground">You</div>
+                      <div className="mt-0.5 font-mono text-sm text-foreground/90">
+                        /build a study group server
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* bot */}
+                  <div className="mt-4 flex gap-3">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground">
+                      <Bot className="size-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-display text-sm font-bold text-foreground">GuildLabs</span>
+                        <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wider text-primary">
+                          Bot
+                        </span>
+                      </div>
+                      <div className="mt-1.5 rounded-xl border-l-4 border-primary bg-card p-3">
+                        <div className="flex items-center gap-1.5 text-[0.65rem] font-semibold text-secondary">
+                          <Boxes className="size-3.5" /> CONSTRUCT BLUEPRINT
+                        </div>
+                        <div className="mt-0.5 font-display text-lg font-black text-foreground">Study Hub</div>
+                        <ul className="mt-2 space-y-0.5 font-mono text-xs text-foreground/80">
+                          {([
+                            { icon: Hash, name: "welcome" },
+                            { icon: Hash, name: "resources" },
+                            { icon: Hash, name: "homework-help" },
+                            { icon: Volume2, name: "Study Room" },
+                          ] as const).map((row) => (
+                            <li key={row.name} className="flex items-center gap-1.5">
+                              {React.createElement(row.icon, { className: "size-3 text-muted-foreground" })}
+                              {row.name}
+                            </li>
+                          ))}
+                        </ul>
+                        <span className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[0.7rem] font-bold text-primary-foreground">
+                          <Rocket className="size-3" /> Open in Construct
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Reveal>
+      </section>
 
       {/* the bots */}
       <section className="px-4 py-20">
