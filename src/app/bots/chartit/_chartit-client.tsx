@@ -1,0 +1,456 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { motion, useReducedMotion } from "framer-motion";
+import {
+  ArrowRight,
+  CandlestickChart,
+  TrendingUp,
+  Bell,
+  Eye,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
+import { GuildLabsLogo } from "@/components/logo";
+import { Button } from "@/components/ui/button";
+import { DiscordIcon } from "@/components/icons/discord";
+import { GithubIcon } from "@/components/icons/github";
+
+// ChartIt brand tokens — green = up, red = down (mirrors the bot's embed colors).
+const UP = "#16c784";
+const DOWN = "#ea3943";
+const UP_SOFT = "rgba(22,199,132,0.12)";
+const UP_GLOW = "rgba(22,199,132,0.35)";
+
+// ChartIt runs on its own Discord app. Falls back to the literal client id so the
+// invite button never 404s in preview.
+const CHARTIT_CLIENT_ID =
+  process.env.NEXT_PUBLIC_CHARTIT_CLIENT_ID ?? "1511281770820145182";
+
+// Send Messages + Embed Links + Use Application Commands.
+const INVITE_URL = `https://discord.com/oauth2/authorize?client_id=${CHARTIT_CLIENT_ID}&permissions=274877992960&scope=bot+applications.commands`;
+const REPO_URL = "https://github.com/LUCAPOPESCU29/GuildLabs";
+
+const PRINCIPLES = [
+  {
+    icon: TrendingUp,
+    title: "Any ticker, charted in one line",
+    body: "Type /chart AAPL and ChartIt pulls a live quote from Yahoo Finance and renders a clean price chart — stocks, ETFs, crypto, indices. No dashboards, no tab-switching.",
+  },
+  {
+    icon: Bell,
+    title: "Watchlists and alerts on autopilot",
+    body: "Auto-post charts to a channel on a schedule during market hours, and ping the room the moment a price crosses a threshold you set. The market comes to your server.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Just data — never advice",
+    body: "ChartIt shows public market data for information only. It never places trades and every embed carries the not-financial-advice disclaimer. Open source, no API keys.",
+  },
+];
+
+export default function ChartItClient() {
+  return (
+    <main className="min-h-screen bg-background text-foreground">
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <header className="border-b border-card-border px-6 py-4">
+        <div className="mx-auto flex max-w-5xl items-center justify-between">
+          <Link href="/" aria-label="GuildLabs home">
+            <GuildLabsLogo className="h-9 w-auto" />
+          </Link>
+          <Link
+            href="/bots"
+            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            ← All bots
+          </Link>
+        </div>
+      </header>
+
+      {/* ── Hero ─────────────────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden px-6 py-24">
+        {/* Soft green glow */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background: `radial-gradient(60% 50% at 50% 0%, ${UP_GLOW}, transparent 70%)`,
+            opacity: 0.4,
+          }}
+        />
+
+        <div className="relative mx-auto max-w-5xl">
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="grid items-center gap-10 lg:grid-cols-[1.1fr,0.9fr]"
+          >
+            <div>
+              {/* ChartIt lockup — branded chart mark + display wordmark */}
+              <div className="flex items-center gap-4">
+                <span
+                  className="grid size-12 place-items-center rounded-2xl sm:size-14"
+                  style={{
+                    background: UP_SOFT,
+                    color: UP,
+                    boxShadow: `0 10px 30px -12px ${UP_GLOW}`,
+                  }}
+                >
+                  <CandlestickChart className="size-7 sm:size-8" />
+                </span>
+                <span className="font-display text-5xl font-black tracking-tight sm:text-6xl">
+                  ChartIt
+                </span>
+              </div>
+
+              <div
+                className="mt-5 inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-xs font-bold uppercase tracking-widest"
+                style={{ background: UP_SOFT, color: UP }}
+              >
+                <CandlestickChart className="size-3.5" />
+                by GuildLabs
+              </div>
+
+              <h1 className="mt-6 font-display text-5xl font-black leading-[0.95] tracking-tight sm:text-6xl">
+                The market,{" "}
+                <span style={{ color: UP }}>in your channel.</span>
+              </h1>
+
+              <p className="mt-5 max-w-lg text-lg text-muted-foreground">
+                ChartIt drops live stock &amp; crypto charts straight into Discord.
+                One slash command pulls a Yahoo Finance quote and renders the
+                chart — no leaving the conversation to go stare at a dashboard.
+              </p>
+
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <a
+                  href={INVITE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center gap-2.5 rounded-full px-6 py-3.5 font-display text-base font-bold text-black transition-all hover:brightness-110 active:scale-[0.98]"
+                  style={{
+                    backgroundColor: UP,
+                    boxShadow: `0 18px 40px -12px ${UP_GLOW}`,
+                  }}
+                >
+                  <DiscordIcon className="size-5" color="currentColor" />
+                  Add ChartIt to your server
+                  <ArrowRight className="size-4" />
+                </a>
+
+                <a href={REPO_URL} target="_blank" rel="noreferrer">
+                  <Button variant="outline" size="lg">
+                    <GithubIcon className="size-5" /> View source
+                  </Button>
+                </a>
+              </div>
+
+              <p className="mt-4 text-xs text-muted-foreground">
+                Free · open source · informational only, not financial advice
+              </p>
+            </div>
+
+            {/* Visual demo */}
+            <ChartItDemo />
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ── Principles ────────────────────────────────────────────────────── */}
+      <section className="px-6 py-20">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-14 max-w-2xl">
+            <span
+              className="font-mono text-xs font-semibold uppercase tracking-[0.18em]"
+              style={{ color: UP }}
+            >
+              How ChartIt works
+            </span>
+            <h2 className="mt-4 font-display text-4xl font-black leading-tight tracking-tight sm:text-5xl">
+              For servers that talk markets{" "}
+              <em className="not-italic text-muted-foreground">all day.</em>
+            </h2>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-3">
+            {PRINCIPLES.map((p, i) => (
+              <motion.div
+                key={p.title}
+                initial={{ opacity: 0, y: 12 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-60px" }}
+                transition={{ duration: 0.5, ease: "easeOut", delay: i * 0.08 }}
+                className="rounded-3xl border border-card-border bg-card p-6"
+              >
+                <div
+                  className="grid size-11 place-items-center rounded-xl"
+                  style={{ background: UP_SOFT, color: UP }}
+                >
+                  <p.icon className="size-5" />
+                </div>
+                <h3 className="mt-5 font-display text-xl font-black">{p.title}</h3>
+                <p className="mt-2 text-sm text-muted-foreground">{p.body}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Commands strip ────────────────────────────────────────────────── */}
+      <section className="px-6 pb-24">
+        <div className="mx-auto max-w-5xl rounded-3xl border border-card-border bg-card p-8">
+          <div className="grid gap-8 md:grid-cols-[1fr,1.4fr]">
+            <div>
+              <h3 className="font-display text-3xl font-black leading-tight">
+                Five commands, every ticker.
+              </h3>
+              <p className="mt-3 text-sm text-muted-foreground">
+                Anyone can chart and quote. Server managers wire up the
+                watchlists and alerts that post on their own.
+              </p>
+            </div>
+
+            <div className="grid gap-2 text-sm">
+              <CommandRow code="/chart <symbol> <range>" desc="Price chart + full quote" />
+              <CommandRow code="/quote <symbol>" desc="Fast text-only quote" />
+              <CommandRow code="/watchlist add | remove | list" desc="Auto-post charts on a schedule" admin />
+              <CommandRow code="/alert add | list | remove" desc="Ping when a price crosses a line" admin />
+              <CommandRow code="/chartit" desc="Help & supported symbols" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Final CTA ─────────────────────────────────────────────────────── */}
+      <section className="px-6 pb-32 text-center">
+        <div className="mx-auto max-w-2xl">
+          <Sparkles className="mx-auto size-8" style={{ color: UP }} />
+          <h2 className="mt-5 font-display text-4xl font-black leading-tight tracking-tight">
+            Stop tabbing out to check the price.
+          </h2>
+          <p className="mt-3 text-muted-foreground">
+            Add ChartIt and pull any chart without ever leaving the
+            conversation. Stocks, crypto, indices — all in one slash command.
+          </p>
+          <a
+            href={INVITE_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-8 inline-flex items-center gap-2.5 rounded-full px-6 py-3.5 font-display text-base font-bold text-black transition-all hover:brightness-110 active:scale-[0.98]"
+            style={{
+              backgroundColor: UP,
+              boxShadow: `0 18px 40px -12px ${UP_GLOW}`,
+            }}
+          >
+            <DiscordIcon className="size-5" color="currentColor" /> Add ChartIt to Discord
+          </a>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+function CommandRow({ code, desc, admin }: { code: string; desc: string; admin?: boolean }) {
+  return (
+    <div className="flex items-baseline gap-3 rounded-xl bg-foreground/[0.03] px-3 py-2">
+      <code className="font-mono text-xs font-semibold">{code}</code>
+      <span className="text-xs text-muted-foreground">{desc}</span>
+      {admin && (
+        <span className="ml-auto rounded-md bg-foreground/[0.06] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
+          admin
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Animated "ChartIt answering /chart AAPL" mockup. A command is typed, then the
+ * embed renders: the price line draws itself, the area fill rises, and the
+ * quote fields stagger in. Loops on a cycle.
+ */
+function ChartItDemo() {
+  const reduce = useReducedMotion();
+  const [stage, setStage] = React.useState(reduce ? 4 : 0);
+
+  React.useEffect(() => {
+    if (reduce) return;
+    const id = setInterval(() => setStage((s) => (s + 1) % 6), 900);
+    return () => clearInterval(id);
+  }, [reduce]);
+
+  // A gently rising AAPL-style close series for the sparkline path.
+  const drawn = stage >= 2;
+
+  return (
+    <div className="rounded-3xl border border-white/10 bg-[#1a1c24] p-3 shadow-[0_30px_80px_-30px_rgba(22,199,132,0.4)]">
+      <div className="rounded-2xl bg-[#0a0a0c] p-4">
+        {/* Channel header */}
+        <div className="flex items-center gap-1.5 text-[11px] text-white/40">
+          <span className="text-white/60">#</span> markets
+        </div>
+
+        {/* User command */}
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="mt-4 flex gap-2.5"
+        >
+          <div className="size-8 shrink-0 rounded-full bg-gradient-to-br from-[#16c784] to-[#0ea5e9]" />
+          <div>
+            <div className="text-sm font-bold text-white">trader_jane</div>
+            <p className="text-sm text-white/80">
+              <span
+                className="rounded-[4px] px-1.5 py-0.5 font-mono text-[13px] font-semibold"
+                style={{ background: UP_SOFT, color: UP }}
+              >
+                /chart
+              </span>{" "}
+              <span className="font-mono text-white/60">symbol:</span> AAPL{" "}
+              <span className="font-mono text-white/60">range:</span> 1M
+            </p>
+          </div>
+        </motion.div>
+
+        {/* ChartIt embed */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: stage >= 1 ? 1 : 0, y: stage >= 1 ? 0 : 8 }}
+          transition={{ duration: 0.4 }}
+          className="mt-4 ml-10 overflow-hidden rounded-md border-l-[3px]"
+          style={{ borderColor: UP, background: "rgba(255,255,255,0.03)" }}
+        >
+          <div className="p-3">
+            {/* Embed author/title */}
+            <div className="flex items-center gap-2">
+              <div
+                className="grid size-6 place-items-center rounded-full"
+                style={{ background: UP_SOFT, color: UP }}
+              >
+                <CandlestickChart className="size-3.5" />
+              </div>
+              <span className="text-sm font-bold text-white">
+                Apple Inc. <span className="text-white/50">(AAPL)</span>
+              </span>
+              <span
+                className="ml-auto inline-flex items-center gap-1 font-mono text-[10px]"
+                style={{ color: UP }}
+              >
+                <span className="size-1.5 rounded-full" style={{ background: UP }} />
+                Open
+              </span>
+            </div>
+
+            {/* The chart canvas — self-drawing line + rising area fill */}
+            <div className="relative mt-3 h-28 overflow-hidden rounded-lg bg-black/40">
+              {/* faint gridlines */}
+              <div
+                aria-hidden
+                className="absolute inset-0 opacity-60"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px)",
+                  backgroundSize: "100% 25%",
+                }}
+              />
+              <svg
+                className="absolute inset-0 size-full"
+                viewBox="0 0 320 112"
+                preserveAspectRatio="none"
+                aria-hidden
+              >
+                <defs>
+                  <linearGradient id="chartit-fill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={UP} stopOpacity="0.30" />
+                    <stop offset="100%" stopColor={UP} stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+
+                {/* Area fill, fades in once the line has drawn */}
+                <motion.path
+                  d="M0,82 L26,78 L52,84 L78,70 L104,72 L130,58 L156,62 L182,46 L208,50 L234,34 L260,38 L286,24 L320,18 L320,112 L0,112 Z"
+                  fill="url(#chartit-fill)"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: drawn ? 1 : 0 }}
+                  transition={{ duration: 0.5 }}
+                />
+
+                {/* Price line draws itself */}
+                <motion.path
+                  d="M0,82 L26,78 L52,84 L78,70 L104,72 L130,58 L156,62 L182,46 L208,50 L234,34 L260,38 L286,24 L320,18"
+                  fill="none"
+                  stroke={UP}
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  initial={{ pathLength: 0 }}
+                  animate={{ pathLength: stage >= 1 ? 1 : 0 }}
+                  transition={{ duration: 1.1, ease: "easeInOut" }}
+                />
+
+                {/* Leading dot rides the end of the line */}
+                <motion.circle
+                  cx="320"
+                  cy="18"
+                  r="3.5"
+                  fill={UP}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: drawn ? 1 : 0 }}
+                  transition={{ duration: 0.3, delay: 0.1 }}
+                />
+              </svg>
+
+              {/* range chip */}
+              <span className="absolute right-2 top-2 rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[9px] text-white/50">
+                1 month
+              </span>
+            </div>
+
+            {/* Quote fields stagger in */}
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {[
+                { label: "Price", value: "201.45 USD", delay: 3 },
+                { label: "Change", value: "▲ +4.12 (+2.09%)", delay: 4, up: true },
+                { label: "Volume", value: "58.2M", delay: 5 },
+              ].map((f) => (
+                <motion.div
+                  key={f.label}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{
+                    opacity: stage >= f.delay ? 1 : 0,
+                    y: stage >= f.delay ? 0 : 6,
+                  }}
+                  transition={{ duration: 0.3 }}
+                  className="rounded-md bg-white/[0.03] px-2 py-1.5"
+                >
+                  <div className="font-mono text-[9px] uppercase tracking-wider text-white/40">
+                    {f.label}
+                  </div>
+                  <div
+                    className="mt-0.5 font-mono text-[11px] font-semibold"
+                    style={{ color: f.up ? UP : "rgba(255,255,255,0.85)" }}
+                  >
+                    {f.value}
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+
+          {/* Embed footer — the standing disclaimer */}
+          <div className="border-t border-white/[0.06] px-3 py-1.5">
+            <span className="flex items-center gap-1.5 font-mono text-[9px] text-white/35">
+              <Eye className="size-3" />
+              Yahoo Finance · informational only, not financial advice
+            </span>
+          </div>
+        </motion.div>
+      </div>
+    </div>
+  );
+}

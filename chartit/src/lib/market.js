@@ -16,6 +16,7 @@ import * as coingecko from "./providers/coingecko.js";
 import * as yahoo from "./providers/yahoo.js";
 import * as nasdaq from "./providers/nasdaq.js";
 import * as guildlabs from "./providers/guildlabs.js";
+import * as yahooNews from "./providers/yahoo-news.js";
 
 // ── Range → granularity + lookback window ────────────────────────────────────
 export const RANGES = {
@@ -40,6 +41,9 @@ const QUOTE_TTL_MS = 30_000;
 
 const historyCache = new Map(); // `${symbol}|${range}` -> { at, data }
 const HISTORY_TTL_MS = 60_000;
+
+const newsCache = new Map(); // symbol -> { at, data }
+const NEWS_TTL_MS = 5 * 60_000; // headlines move slowly; cache generously
 
 /** Reject if `promise` hasn't settled within `ms`. Clears its timer either way. */
 function withTimeout(promise, ms, label) {
@@ -165,4 +169,25 @@ export async function getHistory(symbol, range = DEFAULT_RANGE, { noProxy = fals
   throw new Error(
     `No price history for "${symbol}". Double-check the ticker (e.g. AAPL, MSFT, BTC-USD) — if it's valid, the data source may be briefly rate-limited, so try again in a minute.`
   );
+}
+
+/**
+ * Fetch up to `count` recent headlines for a symbol. News is decorative, so
+ * this NEVER throws — it returns [] on any failure (and caches that briefly too
+ * so a flaky source doesn't get hammered).
+ * @returns {Promise<{title:string, publisher:string, link:string, publishedAt:number|null}[]>}
+ */
+export async function getNews(symbol, count = 3) {
+  const cached = newsCache.get(symbol);
+  if (cached && Date.now() - cached.at < NEWS_TTL_MS) return cached.data;
+
+  let data = [];
+  try {
+    data = await withTimeout(yahooNews.news(symbol, count), PROVIDER_TIMEOUT_MS, yahooNews.name);
+  } catch (err) {
+    console.error(`[MARKET] news ${symbol}:`, err.message);
+    data = [];
+  }
+  newsCache.set(symbol, { at: Date.now(), data });
+  return data;
 }

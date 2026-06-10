@@ -8,23 +8,27 @@
  * the page (no network round-trip, no localhost server), and the rendered PNG
  * is attached inline to the Discord reply.
  *
- * The browser is launched lazily, reused across renders, and closed after a few
- * idle minutes to keep the bot's resting memory low. Renders are serialized so
- * a burst of commands can't spawn many Chromium pages at once.
+ * The headless-Chromium lifecycle (lazy launch, reuse, idle-shutdown, and
+ * serialized renders) lives in ./browser.js so every renderer shares one
+ * browser. closeBrowser is re-exported below so existing importers (index.js's
+ * shutdown handler) keep working unchanged.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
-import puppeteer from "puppeteer";
+import { renderWithPage } from "./browser.js";
+
+export { closeBrowser } from "./browser.js";
 
 const require = createRequire(import.meta.url);
 
 // The standalone UMD build exposes a global `LightweightCharts`. Resolve it via
 // the package root (not a deep subpath) so the package's `exports` map can't
-// block the lookup, then read the file once at startup.
+// block the lookup, then read the file once at startup. Exported so sibling
+// renderers (compare-chart.js) can inject the same library without re-reading it.
 const LWC_DIR = dirname(require.resolve("lightweight-charts/package.json"));
-const LWC_SRC = readFileSync(
+export const LWC_SRC = readFileSync(
   join(LWC_DIR, "dist", "lightweight-charts.standalone.production.js"),
   "utf8"
 );
@@ -35,79 +39,6 @@ const DOWN = "#ea3943";
 const CARD_WIDTH = 760;
 const CHART_WIDTH = 724;
 const CHART_HEIGHT = 360;
-
-const IDLE_SHUTDOWN_MS = 5 * 60_000;
-
-let browserPromise = null;
-let idleTimer = null;
-
-// In Docker we run the system Chromium; locally puppeteer uses its own
-// downloaded build (undefined → puppeteer resolves it). Alpine has shipped the
-// binary under both names across versions, so probe rather than hardcode.
-function chromiumPath() {
-  const candidates = [
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-  ];
-  return candidates.find((p) => p && existsSync(p)) || undefined;
-}
-
-async function getBrowser() {
-  if (!browserPromise) {
-    browserPromise = puppeteer
-      .launch({
-        headless: true,
-        executablePath: chromiumPath(),
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage", // /dev/shm is tiny in containers
-          "--disable-gpu",
-        ],
-      })
-      .catch((err) => {
-        browserPromise = null; // let the next call retry a fresh launch
-        throw err;
-      });
-  }
-  return browserPromise;
-}
-
-/** Close the shared browser — called on shutdown and after an idle period. */
-export async function closeBrowser() {
-  if (idleTimer) {
-    clearTimeout(idleTimer);
-    idleTimer = null;
-  }
-  const pending = browserPromise;
-  browserPromise = null;
-  if (!pending) return;
-  try {
-    const browser = await pending;
-    await browser.close();
-  } catch {
-    // already gone — nothing to clean up
-  }
-}
-
-function scheduleIdleClose() {
-  if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = setTimeout(closeBrowser, IDLE_SHUTDOWN_MS);
-  idleTimer.unref?.(); // don't keep the process alive for the timer
-}
-
-// Run renders one at a time. A page render briefly spikes Chromium's memory, so
-// serializing keeps a burst of /chart commands from launching parallel pages.
-let chain = Promise.resolve();
-function serialize(task) {
-  const run = chain.then(task, task);
-  chain = run.then(
-    () => {},
-    () => {}
-  );
-  return run;
-}
 
 /**
  * @param {{date: Date, open: number, high: number, low: number, close: number}[]} points
@@ -138,10 +69,8 @@ export async function buildChartImage(points, meta) {
 
   const intraday = meta.interval.endsWith("m") || meta.interval.endsWith("h");
 
-  return serialize(async () => {
-    const browser = await getBrowser();
-    const page = await browser.newPage();
-    try {
+  return renderWithPage(async (page) => {
+    {
       await page.setViewport({
         width: CARD_WIDTH + 40,
         height: CHART_HEIGHT + 120,
@@ -242,9 +171,6 @@ export async function buildChartImage(points, meta) {
       const card = await page.$("#card");
       const png = await card.screenshot({ type: "png", omitBackground: true });
       return Buffer.from(png);
-    } finally {
-      await page.close().catch(() => {});
-      scheduleIdleClose();
     }
   });
 }

@@ -1,0 +1,6 @@
+node_modules/
+.env
+.env.local
+*.log
+# Per-guild config (watchlists + alerts) is written here at runtime.
+# Tracked locally for persistence; on Fly it lives on a mounted volume.

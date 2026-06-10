@@ -1,0 +1,6 @@
+node_modules
+.env
+*.log
+.DS_Store
+# Persisted data lives here; gitignored to keep the repo clean
+data

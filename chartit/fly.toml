@@ -1,0 +1,40 @@
+# ChartIt Discord bot — Fly.io config
+# ChartIt keeps a persistent gateway WebSocket AND runs cron jobs (watchlist
+# auto-posts + alert polling), so the machine must never scale to zero.
+
+app = "chartit-bot"
+primary_region = "iad"   # Ashburn (close to Discord US East). Change with `fly regions set`.
+
+[build]
+  # Use the Dockerfile in this directory.
+
+[env]
+  NODE_ENV = "production"
+  BOT_API_PORT = "8080"
+  DATA_DIR = "/data"
+  # Secrets (DISCORD_TOKEN, CLIENT_ID) are set via `fly secrets`.
+
+# ── Persistent storage for watchlists + alerts ───────────────────────────────
+[[mounts]]
+  source = "chartit_data"
+  destination = "/data"
+
+# ── Tiny HTTP service for the health endpoint ────────────────────────────────
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false       # NEVER stop — gateway + scheduler must stay up
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+# ── Process group ────────────────────────────────────────────────────────────
+[processes]
+  app = "node src/index.js"
+
+# ── VM size ──────────────────────────────────────────────────────────────────
+# Charts render in a headless Chromium, which needs real memory headroom on top
+# of the gateway connection + cron jobs. 256mb OOM-kills Chromium; 1gb is safe.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1024mb"

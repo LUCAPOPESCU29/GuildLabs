@@ -37,6 +37,8 @@ import CandleChart, {
   type MaType,
   type CandleChartHandle,
 } from "./_candle-chart";
+import { DrawingStyleBar } from "./_drawing-style-bar";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const MA_TYPES: ReadonlyArray<{ key: MaType; label: string }> = [
   { key: "sma", label: "SMA" },
@@ -633,7 +635,7 @@ export default function LiveChart({
 
   // ── Fetch data on range change + on a refresh interval ─────────────────────
   const load = React.useCallback(
-    async (r: RangeKey, soft: boolean) => {
+    async (r: RangeKey, soft: boolean, attempt = 0) => {
       soft ? setRefreshing(true) : setLoading(true);
       try {
         const res = await fetch(
@@ -646,6 +648,13 @@ export default function LiveChart({
         setLastUpdate(new Date());
         setError(null);
       } catch (err) {
+        // One silent retry on a hard load — smooths over transient upstream
+        // rate-limits (Yahoo) before surfacing an error to the user.
+        if (!soft && attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+          await load(r, false, 1);
+          return;
+        }
         if (!soft) setData(null);
         setError(err instanceof Error ? err.message : "Something went wrong.");
       } finally {
@@ -1454,6 +1463,7 @@ export default function LiveChart({
                   className="absolute inset-0"
                 />
               )}
+              {data && <DrawingStyleBar chartRef={chartRef} />}
               {countdownText && (
                 <div
                   className="pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full border border-card-border px-2.5 py-1 font-mono text-[10px] font-bold tabular-nums text-foreground"
@@ -1512,14 +1522,7 @@ export default function LiveChart({
             </div>
 
             {/* Loading / error overlays */}
-            {loading && !data && (
-              <div className="absolute inset-0 grid place-items-center bg-card">
-                <div className="flex flex-col items-center gap-3 text-muted-foreground">
-                  <RefreshCw className="size-6 animate-spin" style={{ color: UP }} />
-                  <span className="font-mono text-xs">Loading {symbol}…</span>
-                </div>
-              </div>
-            )}
+            {loading && !data && <ChartSkeleton symbol={symbol} />}
             {error && !data && (
               <div className="absolute inset-0 grid place-items-center bg-card px-6 text-center">
                 <div className="max-w-sm">
@@ -1616,17 +1619,28 @@ export default function LiveChart({
 
           {/* ── Stat strip ────────────────────────────────────────────────── */}
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Prev close" value={fmtPrice(data?.prevClose ?? null, data?.currency)} />
-            <Stat
-              label="Day range"
-              value={
-                data?.dayLow != null && data?.dayHigh != null
-                  ? `${fmtNum(data.dayLow)} – ${fmtNum(data.dayHigh)}`
-                  : "—"
-              }
-            />
-            <Stat label="Volume" value={fmtCompact(data?.volume ?? null)} />
-            <Stat label="Range" value={data?.rangeLabel ?? RANGES.find((r) => r.key === range)?.short ?? "—"} />
+            {loading && !data ? (
+              [0, 1, 2, 3].map((i) => (
+                <div key={i} className="rounded-2xl border border-card-border bg-card px-4 py-3">
+                  <Skeleton className="h-2.5 w-16" />
+                  <Skeleton className="mt-2 h-4 w-24" />
+                </div>
+              ))
+            ) : (
+              <>
+                <Stat label="Prev close" value={fmtPrice(data?.prevClose ?? null, data?.currency)} />
+                <Stat
+                  label="Day range"
+                  value={
+                    data?.dayLow != null && data?.dayHigh != null
+                      ? `${fmtNum(data.dayLow)} – ${fmtNum(data.dayHigh)}`
+                      : "—"
+                  }
+                />
+                <Stat label="Volume" value={fmtCompact(data?.volume ?? null)} />
+                <Stat label="Range" value={data?.rangeLabel ?? RANGES.find((r) => r.key === range)?.short ?? "—"} />
+              </>
+            )}
           </div>
 
           {/* ── Footer / disclaimer + CTA ─────────────────────────────────── */}
@@ -1662,6 +1676,38 @@ function Stat({ label, value }: { label: string; value: string }) {
         {label}
       </div>
       <div className="mt-1 font-mono text-sm font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+// Fixed (deterministic) candlestick heights for the loading skeleton.
+const SKELETON_BARS = [
+  38, 52, 44, 61, 70, 58, 66, 80, 72, 64, 55, 68, 78, 86, 74, 62, 50, 58, 67, 76,
+  84, 71, 60, 69, 79, 88, 75, 63, 54, 66,
+];
+
+/** Chart-shaped shimmer placeholder shown during the initial data load. */
+function ChartSkeleton({ symbol }: { symbol: string }) {
+  return (
+    <div className="absolute inset-0 bg-card" aria-busy="true" aria-label={`Loading ${symbol} chart`}>
+      <div className="relative h-full w-full overflow-hidden p-4">
+        <div className="flex h-full items-center gap-1 sm:gap-1.5">
+          {SKELETON_BARS.map((h, i) => (
+            <div
+              key={i}
+              className="flex-1 rounded-sm bg-muted/70"
+              style={{ height: `${h}%`, alignSelf: i % 2 ? "flex-start" : "flex-end" }}
+            />
+          ))}
+        </div>
+        <div
+          aria-hidden
+          className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-foreground/10 to-transparent"
+        />
+      </div>
+      <span className="absolute bottom-3 left-1/2 -translate-x-1/2 font-mono text-xs text-muted-foreground">
+        Loading {symbol}…
+      </span>
     </div>
   );
 }

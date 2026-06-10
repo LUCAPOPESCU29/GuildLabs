@@ -580,6 +580,122 @@ async function getChartDataFromBot(symbol: string, range: Range): Promise<ChartD
   return { ...data, range, interval: RANGES[range].interval, rangeLabel: RANGES[range].label };
 }
 
+// ── CoinGecko (keyless crypto) ───────────────────────────────────────────────
+// Direct, key-free crypto source so crypto pairs (BTC-USD, XRP-USD, …) render
+// even when Yahoo throttles Vercel's IP and the bot relay is unset. Mirrors the
+// bot's coingecko.js. The /ohlc endpoint only accepts a fixed set of day windows
+// and picks granularity automatically, so we snap each range to the nearest one.
+const CG_BASE = "https://api.coingecko.com/api/v3";
+
+// Yahoo-style pair: BASE-QUOTE (e.g. BTC-USD).
+const CG_PAIR_RE = /^([A-Z0-9]{2,10})-([A-Z]{3,4})$/;
+const CG_VS = new Set(["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "BTC", "ETH"]);
+
+const CG_COIN_IDS: Record<string, string> = {
+  BTC: "bitcoin", ETH: "ethereum", SOL: "solana", XRP: "ripple",
+  ADA: "cardano", DOGE: "dogecoin", DOT: "polkadot", LTC: "litecoin",
+  BCH: "bitcoin-cash", LINK: "chainlink", MATIC: "matic-network",
+  AVAX: "avalanche-2", UNI: "uniswap", ATOM: "cosmos", XLM: "stellar",
+  ALGO: "algorand", VET: "vechain", FIL: "filecoin", TRX: "tron",
+  ETC: "ethereum-classic", BNB: "binancecoin", SHIB: "shiba-inu",
+  NEAR: "near", APT: "aptos", ARB: "arbitrum", OP: "optimism",
+  SUI: "sui", PEPE: "pepe", INJ: "injective-protocol", RNDR: "render-token",
+  TON: "the-open-network", USDT: "tether", USDC: "usd-coin",
+};
+
+/** True when this symbol is a crypto pair CoinGecko can resolve. */
+export function isCrypto(symbol: string): boolean {
+  const m = symbol.toUpperCase().match(CG_PAIR_RE);
+  return !!m && CG_COIN_IDS[m[1]] !== undefined && CG_VS.has(m[2]);
+}
+
+// Day windows the free /ohlc endpoint accepts; snap each range to the nearest.
+const CG_OHLC_DAYS = [1, 7, 14, 30, 90, 180, 365] as const;
+function cgPickDays(want: number): number {
+  return CG_OHLC_DAYS.reduce((best, d) => (Math.abs(d - want) < Math.abs(best - want) ? d : best));
+}
+function cgDaysSinceJan1(): number {
+  const now = new Date();
+  const jan1 = new Date(now.getUTCFullYear(), 0, 1);
+  return Math.max(1, Math.ceil((now.getTime() - jan1.getTime()) / 86_400_000));
+}
+const CG_WANT_DAYS: Record<Range, number> = {
+  "1d": 1, "5d": 7, "1mo": 30, "6mo": 180, "1y": 365, ytd: 0,
+};
+
+async function getChartDataFromCoinGecko(symbol: string, range: Range): Promise<ChartData> {
+  const m = symbol.toUpperCase().match(CG_PAIR_RE);
+  if (!m || !CG_COIN_IDS[m[1]]) throw new Error(`coingecko: unsupported symbol "${symbol}"`);
+  const id = CG_COIN_IDS[m[1]];
+  const vs = m[2].toLowerCase();
+  const want = range === "ytd" ? Math.min(365, cgDaysSinceJan1()) : CG_WANT_DAYS[range];
+  const days = cgPickDays(want);
+
+  const url = `${CG_BASE}/coins/${id}/ohlc?vs_currency=${vs}&days=${days}`;
+  const res = await fetch(url, {
+    headers: { Accept: "application/json", "User-Agent": UA },
+    cache: "no-store",
+    signal: AbortSignal.timeout(9000),
+  });
+  if (!res.ok) throw new Error(`coingecko: HTTP ${res.status}`);
+  const rows = (await res.json()) as unknown;
+  if (!Array.isArray(rows)) throw new Error(`coingecko: bad response for "${symbol}"`);
+
+  const candles: Candle[] = [];
+  const seen = new Set<number>();
+  for (const r of rows) {
+    if (!Array.isArray(r) || r.length < 5) continue;
+    const time = Math.floor(Number(r[0]) / 1000);
+    const close = num(r[4]);
+    if (!Number.isFinite(time) || close == null || seen.has(time)) continue;
+    seen.add(time);
+    candles.push({
+      time,
+      open: num(r[1]) ?? close,
+      high: num(r[2]) ?? close,
+      low: num(r[3]) ?? close,
+      close,
+      volume: null, // /ohlc carries no volume
+    });
+  }
+  candles.sort((a, b) => a.time - b.time);
+  if (candles.length === 0) throw new Error(`coingecko: no history for "${symbol}"`);
+
+  const last = candles[candles.length - 1];
+  // Approximate the daily change: the last close at or before ~24h ago.
+  const dayAgo = last.time - 86_400;
+  let prevClose = candles[0].close;
+  for (const c of candles) {
+    if (c.time <= dayAgo) prevClose = c.close;
+    else break;
+  }
+  const price = last.close;
+  const change = price - prevClose;
+  const changePercent = prevClose ? (change / prevClose) * 100 : null;
+  const dayHigh = Math.max(...candles.map((c) => c.high));
+  const dayLow = Math.min(...candles.map((c) => c.low));
+
+  return {
+    symbol: symbol.toUpperCase(),
+    name: symbol.toUpperCase(),
+    currency: m[2],
+    exchange: "CoinGecko",
+    marketState: null,
+    price,
+    prevClose,
+    change,
+    changePercent,
+    dayHigh,
+    dayLow,
+    volume: null,
+    range,
+    interval: RANGES[range].interval,
+    rangeLabel: RANGES[range].label,
+    candles,
+    displayStartTime: displayStartSeconds(range),
+  };
+}
+
 /** Fetch OHLC + a live quote for `symbol` over `range`. Throws on no data. */
 export async function getChartData(symbol: string, range: Range): Promise<ChartData> {
   // Try Yahoo first (richest data, covers intraday + crypto + indices when it
@@ -592,6 +708,15 @@ export async function getChartData(symbol: string, range: Range): Promise<ChartD
   try {
     return await getChartDataFromYahoo(symbol, range);
   } catch (yErr) {
+    // Crypto: try the keyless CoinGecko source before anything else, so crypto
+    // pairs render even when Yahoo throttles our IP and no relay is configured.
+    if (isCrypto(symbol)) {
+      try {
+        return await getChartDataFromCoinGecko(symbol, range);
+      } catch {
+        // CoinGecko unreachable/rate-limited — fall through to the rest.
+      }
+    }
     if (intraday) {
       // Twelve Data serves real stock intraday with a key; the bot reaches
       // Yahoo/CoinGecko intraday (covers crypto). Nasdaq is daily-only — skip it
@@ -729,4 +854,142 @@ async function getChartDataFromYahoo(symbol: string, range: Range): Promise<Char
     displayStartTime: displayStartSeconds(range),
     events: events.length > 0 ? events : undefined,
   };
+}
+
+// ── Lightweight batch quotes (for the watchlist) ─────────────────────────────
+// Deliberately NOT the heavy getChartData — one CoinGecko call covers all USD
+// crypto pairs, and the rest read Yahoo's chart-meta (price + previous close)
+// with a small concurrency cap. Per-symbol cached ~15s; never throws.
+
+export interface QuoteLite {
+  symbol: string;
+  last: number;
+  chg: number;
+  chgPct: number;
+  currency: string;
+}
+
+const quoteCache = new Map<string, { at: number; data: QuoteLite }>();
+const QUOTE_TTL_MS = 15_000;
+
+/** Reverse CG_COIN_IDS so we can map a CoinGecko id back to its ticker. */
+const CG_ID_TO_SYMBOL: Record<string, string> = Object.fromEntries(
+  Object.entries(CG_COIN_IDS).map(([sym, id]) => [id, sym])
+);
+
+async function cryptoQuotes(symbols: string[]): Promise<QuoteLite[]> {
+  // Only USD pairs go through the batched simple/price call.
+  const usd = symbols.filter((s) => {
+    const m = s.toUpperCase().match(CG_PAIR_RE);
+    return m && CG_COIN_IDS[m[1]] && m[2] === "USD";
+  });
+  if (usd.length === 0) return [];
+  const ids = usd.map((s) => CG_COIN_IDS[s.toUpperCase().match(CG_PAIR_RE)![1]]);
+  const url = `${CG_BASE}/simple/price?ids=${ids.join(",")}&vs_currencies=usd&include_24hr_change=true`;
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: "application/json", "User-Agent": UA },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as Record<string, { usd?: number; usd_24h_change?: number }>;
+    const out: QuoteLite[] = [];
+    for (const [id, v] of Object.entries(json)) {
+      const sym = CG_ID_TO_SYMBOL[id];
+      const last = num(v?.usd);
+      if (!sym || last == null) continue;
+      const chgPct = num(v?.usd_24h_change) ?? 0;
+      const prev = chgPct !== -100 ? last / (1 + chgPct / 100) : last;
+      out.push({ symbol: `${sym}-USD`, last, chg: last - prev, chgPct, currency: "USD" });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+async function yahooQuote(symbol: string): Promise<QuoteLite | null> {
+  try {
+    const json = (await fetchYahoo(symbol, "1d", "1d")) as {
+      chart?: { result?: Array<{ meta?: Record<string, unknown> }> };
+    };
+    const meta = json?.chart?.result?.[0]?.meta;
+    if (!meta) return null;
+    const last = num(meta.regularMarketPrice);
+    if (last == null) return null;
+    const prev =
+      num(meta.previousClose) ?? num((meta as Record<string, unknown>).chartPreviousClose) ?? last;
+    return {
+      symbol: String(meta.symbol ?? symbol).toUpperCase(),
+      last,
+      chg: last - prev,
+      chgPct: prev ? ((last - prev) / prev) * 100 : 0,
+      currency: String(meta.currency ?? "USD"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function nasdaqQuote(symbol: string): Promise<QuoteLite | null> {
+  // Nasdaq's /info endpoint answers datacenter IPs (unlike Yahoo) and gives last
+  // price + change directly. Covers US stocks/ETFs (NASDAQ_CLASSES).
+  try {
+    const json = await fetchNasdaqJson(`/${encodeURIComponent(symbol.toUpperCase())}/info?_=1`);
+    const qd = json?.data as
+      | { symbol?: string; primaryData?: { lastSalePrice?: string; netChange?: string; percentageChange?: string; currency?: string | null } }
+      | undefined;
+    const p = qd?.primaryData;
+    const last = parseMoney(p?.lastSalePrice);
+    if (last == null) return null;
+    return {
+      symbol: (qd?.symbol || symbol).toUpperCase(),
+      last,
+      chg: parseMoney(p?.netChange) ?? 0,
+      chgPct: parsePercent(p?.percentageChange) ?? 0,
+      currency: p?.currency || "USD",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Batch light quotes. Returns only the symbols that resolved. Never throws. */
+export async function getQuotes(symbols: string[]): Promise<QuoteLite[]> {
+  const unique = [...new Set(symbols.map((s) => s.toUpperCase()))];
+  const now = Date.now();
+  const out: QuoteLite[] = [];
+  const need: string[] = [];
+
+  for (const s of unique) {
+    const c = quoteCache.get(s);
+    if (c && now - c.at < QUOTE_TTL_MS) out.push(c.data);
+    else need.push(s);
+  }
+  if (need.length === 0) return out;
+
+  const cryptoSyms = need.filter((s) => isCrypto(s));
+  const otherSyms = need.filter((s) => !isCrypto(s));
+
+  // Crypto in one batched call.
+  const cryptoResults = await cryptoQuotes(cryptoSyms);
+
+  // Others with a small concurrency pool to stay gentle on Yahoo.
+  const otherResults: QuoteLite[] = [];
+  const POOL = 6;
+  for (let i = 0; i < otherSyms.length; i += POOL) {
+    const slice = otherSyms.slice(i, i + POOL);
+    // Nasdaq first (reliable from Vercel for stocks/ETFs); Yahoo for the rest
+    // (indices/forex) as best-effort.
+    const settled = await Promise.all(
+      slice.map(async (s) => (await nasdaqQuote(s)) ?? (await yahooQuote(s)))
+    );
+    for (const q of settled) if (q) otherResults.push(q);
+  }
+
+  for (const q of [...cryptoResults, ...otherResults]) {
+    quoteCache.set(q.symbol.toUpperCase(), { at: now, data: q });
+    out.push(q);
+  }
+  return out;
 }

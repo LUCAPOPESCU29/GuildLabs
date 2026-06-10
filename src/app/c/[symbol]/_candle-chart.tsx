@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { DrawingRail } from "./_drawing-rail";
 
 // GuildLabs candlestick chart — hand-built, no third-party charting runtime.
 //
@@ -210,6 +211,12 @@ interface CandleChartProps {
 // Imperative handle the wrapper can call (e.g. to download a PNG of the chart).
 export interface CandleChartHandle {
   exportPng: (filename: string) => void;
+  /** Id of the currently selected drawing, or null. */
+  getSelectedId: () => string | null;
+  /** Colour of the selected drawing, or null when nothing is selected. */
+  getSelectedColor: () => string | null;
+  /** Recolour the selected drawing (persists + repaints). */
+  setSelectedColor: (c: string) => void;
 }
 
 // ── Number / time formatting ─────────────────────────────────────────────────
@@ -1117,13 +1124,19 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     redo: () => void;
     clearDrawings: () => void;
     checkAlerts: (prev: number | null, next: number | null) => void;
+    getSelectedId: () => string | null;
+    getSelectedColor: () => string | null;
+    setSelectedColor: (c: string) => void;
   } | null>(null);
 
-  // Expose imperative actions (PNG export) to the wrapper via ref.
+  // Expose imperative actions (PNG export + selection-colour bridge) via ref.
   React.useImperativeHandle(
     ref,
     () => ({
       exportPng: (filename: string) => apiRef.current?.exportPng(filename),
+      getSelectedId: () => apiRef.current?.getSelectedId() ?? null,
+      getSelectedColor: () => apiRef.current?.getSelectedColor() ?? null,
+      setSelectedColor: (c: string) => apiRef.current?.setSelectedColor(c),
     }),
     []
   );
@@ -3732,7 +3745,21 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     };
 
     // Expose the bits the data effect needs, then do the first layout.
-    apiRef.current = { schedule, fit, reset, exportPng, undo, redo, clearDrawings: clearAllDrawings, checkAlerts };
+    apiRef.current = {
+      schedule, fit, reset, exportPng, undo, redo, clearDrawings: clearAllDrawings, checkAlerts,
+      // Selection-colour bridge for the React style bar. Colour is the one
+      // attribute every renderer already honours (d.color), so setting it only
+      // mutates data + repaints + persists — no render-loop changes.
+      getSelectedId: () => selectedId,
+      getSelectedColor: () => drawings.find((d) => d.id === selectedId)?.color ?? null,
+      setSelectedColor: (c: string) => {
+        const d = drawings.find((x) => x.id === selectedId);
+        if (!d) return;
+        d.color = c;
+        saveDrawings();
+        schedule();
+      },
+    };
     if (candlesRef.current.length > 0 && rangeRef.current === null) fit();
     applySize();
 
@@ -4360,81 +4387,17 @@ const CandleChart = React.forwardRef<CandleChartHandle, CandleChartProps>(functi
     <div ref={wrapRef} className={className} tabIndex={0} style={{ outline: "none" }}>
       <canvas ref={canvasRef} style={{ display: "block", touchAction: "none" }} />
 
-      {/* Drawing toolbar (bottom-left): cursor · h-line · trend · fib · erase */}
-      <div
-        className="absolute bottom-2 left-2 z-10 inline-flex items-center gap-0.5 rounded-full border border-card-border p-0.5"
-        style={{
-          background: "color-mix(in oklab, var(--card) 78%, transparent)",
-          backdropFilter: "blur(8px)",
-        }}
-      >
-        {(
-          [
-            ["cursor", "↖", "Cursor / select / pan"],
-            ["hline", "─", "Horizontal line"],
-            ["trend", "╱", "Trend line"],
-            ["ray", "→", "Ray (extends right)"],
-            ["arrow", "↗", "Arrow"],
-            ["rect", "▭", "Rectangle / zone"],
-            ["vline", "│", "Vertical line"],
-            ["fib", "≣", "Fibonacci"],
-            ["channel", "▱", "Parallel channel"],
-            ["long", "L↑", "Long position (risk/reward)"],
-            ["short", "S↓", "Short position (risk/reward)"],
-            ["alert", "🔔", "Price alert (browser notify while tab open)"],
-            ["avwap", "⩒", "Anchored VWAP"],
-            ["text", "T", "Text note"],
-            ["erase", "⌫", "Erase (click a drawing)"],
-          ] as const
-        ).map(([key, glyph, label]) => {
-          const active = tool === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTool((t) => (t === key ? "cursor" : key))}
-              title={label}
-              aria-label={label}
-              aria-pressed={active}
-              className="flex h-6 w-6 items-center justify-center rounded-full font-mono text-xs transition-colors"
-              style={
-                active
-                  ? { background: "var(--success)", color: "#000" }
-                  : { color: "var(--muted-foreground)" }
-              }
-            >
-              {glyph}
-            </button>
-          );
-        })}
-        {/* divider */}
-        <span className="mx-0.5 h-4 w-px" style={{ background: "var(--card-border)" }} />
-        {(
-          [
-            ["magnet", "🧲", "Magnet: snap to OHLC", magnet, () => setMagnet((m) => !m)],
-            ["undo", "↶", "Undo (⌘Z)", false, () => apiRef.current?.undo()],
-            ["redo", "↷", "Redo (⇧⌘Z)", false, () => apiRef.current?.redo()],
-            ["clear", "🗑", "Clear all drawings", false, () => apiRef.current?.clearDrawings()],
-          ] as const
-        ).map(([key, glyph, label, active, onClick]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={onClick}
-            title={label}
-            aria-label={label}
-            aria-pressed={active}
-            className="flex h-6 w-6 items-center justify-center rounded-full font-mono text-xs transition-colors"
-            style={
-              active
-                ? { background: "var(--success)", color: "#000" }
-                : { color: "var(--muted-foreground)" }
-            }
-          >
-            {glyph}
-          </button>
-        ))}
-      </div>
+      {/* TradingView-style left drawing rail with grouped flyouts. Wires to the
+          same engine state (tool/setTool/magnet/apiRef) — geometry untouched. */}
+      <DrawingRail
+        tool={tool}
+        onSelect={(t) => setTool(t)}
+        magnet={magnet}
+        onToggleMagnet={() => setMagnet((m) => !m)}
+        onUndo={() => apiRef.current?.undo()}
+        onRedo={() => apiRef.current?.redo()}
+        onClear={() => apiRef.current?.clearDrawings()}
+      />
       <button
         type="button"
         onClick={() => apiRef.current?.reset()}
