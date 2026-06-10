@@ -44,7 +44,7 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/bot/guilds", { cache: "no-store" });
+      const res = await fetch("/api/me/guilds", { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Bot is offline.");
       setGuilds(Array.isArray(json) ? json : []);

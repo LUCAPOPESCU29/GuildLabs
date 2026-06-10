@@ -38,7 +38,7 @@ async function fetchMe(): Promise<User | null> {
 }
 
 async function fetchGuilds(): Promise<Guild[]> {
-  const r = await fetch("/api/bot/guilds");
+  const r = await fetch("/api/me/guilds", { cache: "no-store" });
   const d = await r.json().catch(() => []);
   return Array.isArray(d) ? d : [];
 }

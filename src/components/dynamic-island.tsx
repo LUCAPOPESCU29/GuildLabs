@@ -40,7 +40,7 @@ export function DynamicIsland() {
       setLoadingGuilds(true);
       const t0 = performance.now();
       try {
-        const res = await fetch("/api/bot/guilds", { cache: "no-store" });
+        const res = await fetch("/api/me/guilds", { cache: "no-store" });
         const ms = Math.round(performance.now() - t0);
         if (cancelled) return;
         if (res.ok) {
