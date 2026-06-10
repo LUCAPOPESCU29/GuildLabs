@@ -33,6 +33,7 @@ import {
 type Item = { label: string; href: string; icon: React.ComponentType<{ className?: string }>; hint?: string };
 
 const PAGES: Item[] = [
+  { label: "Playground — chat with the bot", href: "/playground", icon: Wand2 },
   { label: "ChartIt — live charts", href: "/bots/chartit", icon: LineChart },
   { label: "Construct — server builder", href: "/bots/construct", icon: Boxes },
   { label: "Maven — community", href: "/bots/maven", icon: BookOpen },

@@ -28,6 +28,7 @@ const PRODUCTS: NavGroup = {
 const RESOURCES: NavGroup = {
   label: "Resources",
   items: [
+    { label: "Playground", href: "/playground", desc: "Chat with the bot — try / commands" },
     { label: "Docs", href: "/docs", desc: "Command references" },
     { label: "Guides", href: "/guides", desc: "How-tos & playbooks" },
     { label: "Compare", href: "/vs", desc: "GuildLabs vs alternatives" },
