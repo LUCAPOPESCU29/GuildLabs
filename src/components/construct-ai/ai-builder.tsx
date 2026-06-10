@@ -25,6 +25,29 @@ export function AiBuilder() {
   const [source, setSource] = React.useState<"ai" | "offline">("ai");
   const [errorMsg, setErrorMsg] = React.useState("");
   const runToken = React.useRef(0);
+  const handoffRef = React.useRef(false);
+
+  // If we arrived from the playground's "Open in Construct", load that blueprint
+  // straight into the result view.
+  React.useEffect(() => {
+    if (handoffRef.current) return;
+    handoffRef.current = true;
+    try {
+      const raw = sessionStorage.getItem("construct:handoff");
+      if (!raw) return;
+      sessionStorage.removeItem("construct:handoff");
+      const h = JSON.parse(raw);
+      if (h?.blueprint) {
+        /* eslint-disable react-hooks/set-state-in-effect -- one-time handoff */
+        setBlueprint(h.blueprint);
+        setSource(h.source === "offline" ? "offline" : "ai");
+        setPhase("result");
+        /* eslint-enable react-hooks/set-state-in-effect */
+      }
+    } catch {
+      /* ignore malformed handoff */
+    }
+  }, []);
 
   const runGenerate = React.useCallback(
     async (desc: string, ans: AiAnswer[]) => {

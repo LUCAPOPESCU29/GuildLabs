@@ -7,7 +7,7 @@
  * `groq.ts` (server-only); the Yup validation lives in `blueprint-validate.ts`.
  */
 
-import { PERM_PRESETS, ROLE_PALETTE, type PermPreset } from "./blueprint";
+import { PERM_PRESETS, ROLE_PALETTE, type PermPreset, type Blueprint } from "./blueprint";
 
 // ── Input caps (token / cost guard) ──────────────────────────────────────────
 export const CAPS = {
@@ -114,6 +114,86 @@ Respond with ONLY a JSON object, no prose, in exactly one of these two shapes:
 {"done": true}
 or
 {"done": false, "questions": [{"id": "size", "question": "How big do you expect it to get?", "options": ["< 100", "100–1k", "1k–10k", "10k+"], "allowFreeText": true}]}`;
+
+// ── Honour explicit count requests ("at least 20 channels and 13 roles") ─────
+function numBefore(text: string, keyword: string): number | null {
+  const idx = text.indexOf(keyword);
+  if (idx < 0) return null;
+  const nums = text.slice(Math.max(0, idx - 28), idx).match(/\d+/g);
+  return nums ? parseInt(nums[nums.length - 1], 10) : null;
+}
+
+const CHANNEL_PAD_POOL = [
+  "lounge", "media", "polls", "clips", "events", "resources", "feedback",
+  "introductions", "off-topic", "memes", "wins", "watchlist", "ideas", "news",
+  "alerts", "questions", "showcase", "support", "general-chat", "daily-discussion",
+];
+const ROLE_PAD_POOL = [
+  "Member", "Regular", "Active", "Contributor", "Supporter", "Veteran", "VIP",
+  "Elite", "Rookie", "Mentor", "Analyst", "Trader", "Investor", "Helper",
+];
+
+/**
+ * If the user explicitly asked for a minimum number of channels/roles, pad the
+ * blueprint with sensible extras so we don't undershoot the request. Recomputes
+ * stats. Pure + client-safe.
+ */
+export function enforceCounts(bp: Blueprint, description: string): Blueprint {
+  const lc = description.toLowerCase();
+  const reqChannels = numBefore(lc, "chan");
+  const reqRoles = numBefore(lc, "role");
+
+  const categories = bp.categories.map((c) => ({ ...c, channels: [...c.channels] }));
+  const roles = [...bp.roles];
+
+  if (reqChannels && reqChannels > 0) {
+    const cap = Math.min(reqChannels, CAPS.categories * CAPS.channelsPerCategory, 60);
+    const seen = new Set(categories.flatMap((c) => c.channels.map((ch) => ch.name.toLowerCase())));
+    const target =
+      categories.find((c) => !["STAFF", "INFO"].includes(c.name.toUpperCase())) ??
+      categories[categories.length - 1];
+    let total = categories.reduce((n, c) => n + c.channels.length, 0);
+    let i = 0;
+    while (total < cap && i < CHANNEL_PAD_POOL.length * 4 && target) {
+      const base = CHANNEL_PAD_POOL[i % CHANNEL_PAD_POOL.length];
+      const suffix = i >= CHANNEL_PAD_POOL.length ? `-${Math.floor(i / CHANNEL_PAD_POOL.length) + 1}` : "";
+      const name = `${base}${suffix}`;
+      i++;
+      if (seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      target.channels.push({ name, type: "text" });
+      total++;
+    }
+  }
+
+  if (reqRoles && reqRoles > 0) {
+    const cap = Math.min(reqRoles, CAPS.roles);
+    const seen = new Set(roles.map((r) => r.name.toLowerCase()));
+    let i = 0;
+    while (roles.length < cap && i < ROLE_PAD_POOL.length * 4) {
+      const base = ROLE_PAD_POOL[i % ROLE_PAD_POOL.length];
+      const suffix = i >= ROLE_PAD_POOL.length ? ` ${Math.floor(i / ROLE_PAD_POOL.length) + 1}` : "";
+      const name = `${base}${suffix}`;
+      i++;
+      if (seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      roles.push({ name, color: ROLE_PALETTE[roles.length % ROLE_PALETTE.length], hoist: false, perms: PERM_PRESETS.member });
+    }
+  }
+
+  const allChannels = categories.flatMap((c) => c.channels);
+  return {
+    ...bp,
+    categories,
+    roles,
+    stats: {
+      categories: categories.length,
+      channels: allChannels.length,
+      voice: allChannels.filter((c) => c.type === "voice" || c.type === "stage").length,
+      roles: roles.length,
+    },
+  };
+}
 
 export function buildGenerateSystem(): string {
   const palette = ROLE_PALETTE.join(", ");

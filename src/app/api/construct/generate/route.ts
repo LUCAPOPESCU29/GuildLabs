@@ -3,6 +3,7 @@ import {
   buildGenerateSystem,
   sanitizeDescription,
   sanitizeAnswers,
+  enforceCounts,
   type ConstructError,
 } from "@/lib/construct-ai";
 import { callGroq, isGroqConfigured, GroqError } from "@/lib/groq";
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
   if (!isGroqConfigured()) {
     return NextResponse.json({
       ok: true,
-      blueprint: fallbackBlueprint(description, answers),
+      blueprint: enforceCounts(fallbackBlueprint(description, answers), description),
       source: "offline",
     } satisfies GenerateOk);
   }
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const blueprint = validateBlueprint(parsed);
+    const blueprint = enforceCounts(validateBlueprint(parsed), description);
     return NextResponse.json({ ok: true, blueprint, source: "ai" } satisfies GenerateOk);
   } catch (e) {
     if (e instanceof BlueprintInvalid) {

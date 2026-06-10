@@ -32,12 +32,16 @@ import {
 } from "lucide-react";
 import type { Blueprint } from "@/lib/blueprint";
 import { GuildLabsLogo } from "@/components/logo";
+import { DeployDialog } from "@/components/deploy-dialog";
+import { aiBlueprintToDeployJSON, type DeployJSON } from "@/lib/construct-deploy";
+import { Confetti } from "@/components/construct-ai/magic";
 import { cn } from "@/lib/utils";
 
 // ── Slash command registry ────────────────────────────────────────────────────
-type CmdName = "build" | "chart" | "ask" | "help" | "clear";
+type CmdName = "build" | "playgroundbuild" | "chart" | "ask" | "help" | "clear";
 const COMMANDS: { name: CmdName; icon: React.ComponentType<{ className?: string }>; args: string; desc: string }[] = [
   { name: "build", icon: Wand2, args: "<description>", desc: "Construct — build a Discord server from a description" },
+  { name: "playgroundbuild", icon: Rocket, args: "<description>", desc: "Construct — build AND deploy it to your server" },
   { name: "chart", icon: LineChart, args: "<ticker>", desc: "ChartIt — post a live chart (e.g. AAPL, BTC-USD)" },
   { name: "ask", icon: MessageCircleQuestion, args: "<question>", desc: "Maven — ask anything about GuildLabs" },
   { name: "help", icon: Sparkles, args: "", desc: "List available commands" },
@@ -88,6 +92,9 @@ export function Playground() {
   const [draft, setDraft] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [activeChannel, setActiveChannel] = React.useState<string>("build");
+  const [deployOpen, setDeployOpen] = React.useState(false);
+  const [deployJSON, setDeployJSON] = React.useState<DeployJSON | null>(null);
+  const [deployed, setDeployed] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
@@ -128,6 +135,32 @@ export function Playground() {
       const data = await res.json();
       if (data?.ok && data.blueprint) {
         replace(typingId, { role: "bot", kind: "blueprint", blueprint: data.blueprint, source: data.source });
+      } else {
+        replace(typingId, { role: "bot", kind: "error", content: data?.error || "Couldn't build that — try rephrasing." });
+      }
+    } catch {
+      replace(typingId, { role: "bot", kind: "error", content: "Network error — try again." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runPlaygroundBuild(prompt: string) {
+    if (!prompt.trim()) return botText("Tell me what to build — e.g. `/playgroundbuild a study group server`.");
+    const typingId = push({ role: "bot", kind: "typing", content: "Designing your server…" });
+    setBusy(true);
+    try {
+      const res = await fetch("/api/construct/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: prompt, answers: [] }),
+      });
+      const data = await res.json();
+      if (data?.ok && data.blueprint) {
+        replace(typingId, { role: "bot", kind: "blueprint", blueprint: data.blueprint, source: data.source });
+        setDeployJSON(aiBlueprintToDeployJSON(data.blueprint));
+        setDeployOpen(true);
+        push({ role: "bot", kind: "text", content: "Pick a server below and I'll build it there. 👇" });
       } else {
         replace(typingId, { role: "bot", kind: "error", content: data?.error || "Couldn't build that — try rephrasing." });
       }
@@ -208,6 +241,7 @@ export function Playground() {
       push({ role: "user", kind: "text", content: text });
       switch (cmd.toLowerCase()) {
         case "build": return void runBuild(arg);
+        case "playgroundbuild": return void runPlaygroundBuild(arg);
         case "chart": return void runChart(arg);
         case "ask": return void runAsk(arg);
         case "help": return void push({ role: "bot", kind: "help", content: "Here's what I can do:" });
@@ -380,6 +414,17 @@ export function Playground() {
           </div>
         </div>
       </div>
+
+      <DeployDialog
+        open={deployOpen}
+        onClose={() => setDeployOpen(false)}
+        blueprint={deployJSON}
+        onDeployed={() => {
+          setDeployed(true);
+          push({ role: "bot", kind: "text", content: "✅ Done — I built it directly in your server!" });
+        }}
+      />
+      <Confetti fire={deployed} />
     </div>
   );
 }
@@ -537,9 +582,20 @@ function BlueprintEmbed({ bp, source }: { bp: Blueprint; source?: "ai" | "offlin
         ))}
       </div>
 
-      <Link href="/#builder" className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-bold text-primary-foreground hover:brightness-110">
+      <button
+        type="button"
+        onClick={() => {
+          try {
+            sessionStorage.setItem("construct:handoff", JSON.stringify({ blueprint: bp, source }));
+          } catch {
+            /* ignore */
+          }
+          window.location.href = "/#builder";
+        }}
+        className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-bold text-primary-foreground hover:brightness-110 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         <Rocket className="size-4" /> Open in Construct <ArrowRight className="size-3.5" />
-      </Link>
+      </button>
     </div>
   );
 }
