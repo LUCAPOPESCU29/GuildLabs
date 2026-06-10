@@ -55,6 +55,14 @@ export function AiBuilder() {
     []
   );
 
+  const onClarifyDone = React.useCallback(
+    (a: AiAnswer[]) => {
+      setAnswers(a);
+      void runGenerate(description, a);
+    },
+    [description, runGenerate]
+  );
+
   function startFromDescribe() {
     if (!hasAcceptedTos()) {
       setPhase("tos");
@@ -96,13 +104,7 @@ export function AiBuilder() {
 
         {phase === "clarify" && (
           <motion.div key="clarify" {...fade}>
-            <ClarifyChat
-              description={description}
-              onDone={(a) => {
-                setAnswers(a);
-                void runGenerate(description, a);
-              }}
-            />
+            <ClarifyChat description={description} onDone={onClarifyDone} />
           </motion.div>
         )}
 

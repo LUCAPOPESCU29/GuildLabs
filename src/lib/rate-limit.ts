@@ -1,5 +1,5 @@
 /**
- * Minimal in-memory, per-IP sliding-window rate limiter for the Construct AI
+ * Minimal in-memory, per-IP fixed-window rate limiter for the Construct AI
  * routes. This is a single-instance guard (good enough for a $0 pre-launch
  * deployment); swap for a shared store (Redis/Upstash) if it ever scales out.
  */

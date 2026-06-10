@@ -23,6 +23,7 @@ export function CountUp({
     if (reduce) return;
     const el = ref.current;
     if (!el) return;
+    let raf = 0;
     const io = new IntersectionObserver(
       ([entry]) => {
         if (!entry.isIntersecting || started.current) return;
@@ -32,14 +33,17 @@ export function CountUp({
           const p = Math.min(1, (t - start) / duration);
           const eased = 1 - Math.pow(1 - p, 3);
           setN(Math.round(value * eased));
-          if (p < 1) requestAnimationFrame(tick);
+          if (p < 1) raf = requestAnimationFrame(tick);
         };
-        requestAnimationFrame(tick);
+        raf = requestAnimationFrame(tick);
       },
       { threshold: 0.4 }
     );
     io.observe(el);
-    return () => io.disconnect();
+    return () => {
+      io.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [value, duration, reduce]);
 
   return (

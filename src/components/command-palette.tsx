@@ -104,6 +104,9 @@ export function CommandPalette() {
             exit={{ opacity: 0 }}
           />
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Command menu"
             className="glass-strong relative w-full max-w-xl overflow-hidden rounded-2xl shadow-2xl"
             initial={reduce ? { opacity: 0 } : { opacity: 0, y: -12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
