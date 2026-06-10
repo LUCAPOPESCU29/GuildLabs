@@ -44,7 +44,7 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/bot/guilds");
+      const res = await fetch("/api/bot/guilds", { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Bot is offline.");
       setGuilds(Array.isArray(json) ? json : []);
@@ -56,7 +56,7 @@ export default function DashboardPage() {
   }, []);
 
   React.useEffect(() => {
-    fetch("/api/auth/me")
+    fetch("/api/auth/me", { cache: "no-store" })
       .then((r) => r.json())
       .then((u: User | null) => {
         setUser(u);

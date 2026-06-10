@@ -29,7 +29,7 @@ export function DynamicIsland() {
     (async () => {
       let u: User | null = null;
       try {
-        u = await fetch("/api/auth/me").then((r) => r.json());
+        u = await fetch("/api/auth/me", { cache: "no-store" }).then((r) => r.json());
       } catch {
         u = null;
       }
@@ -40,7 +40,7 @@ export function DynamicIsland() {
       setLoadingGuilds(true);
       const t0 = performance.now();
       try {
-        const res = await fetch("/api/bot/guilds");
+        const res = await fetch("/api/bot/guilds", { cache: "no-store" });
         const ms = Math.round(performance.now() - t0);
         if (cancelled) return;
         if (res.ok) {
