@@ -57,6 +57,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Lets env(safe-area-inset-*) report real values so fixed UI (the floating
+  // navbar) clears the notch / home indicator. Zoom is intentionally NOT
+  // disabled — that's an accessibility failure.
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: dark)", color: "#15131e" },
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },

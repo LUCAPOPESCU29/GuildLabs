@@ -192,6 +192,16 @@
     backdrop-filter: blur(16px) saturate(140%);
     border: 1px solid color-mix(in oklab, var(--card-border) 80%, transparent);
   }
+  /* A blurred, saturated fixed bar is expensive to recomposite on every scroll
+     frame on phones. Use a cheaper blur + a more opaque background (so it still
+     reads) on small screens. */
+  @media (max-width: 768px) {
+    .nav-blur {
+      background: color-mix(in oklab, var(--card) 88%, transparent);
+      -webkit-backdrop-filter: blur(8px);
+      backdrop-filter: blur(8px);
+    }
+  }
 
   /* subtle interactive lift for cards/links — token-driven, reduced-motion safe */
   .card-hover {

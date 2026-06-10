@@ -26,6 +26,9 @@ export function SpotlightCard({
   glow?: string;
 } & React.HTMLAttributes<HTMLElement>) {
   const onPointerMove = React.useCallback((e: React.PointerEvent<HTMLElement>) => {
+    // Only track a real mouse. On touch the glow is invisible anyway, and
+    // running getBoundingClientRect on every touchmove janks scrolling.
+    if (e.pointerType !== "mouse") return;
     const el = e.currentTarget;
     const r = el.getBoundingClientRect();
     el.style.setProperty("--mx", `${e.clientX - r.left}px`);

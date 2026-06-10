@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { motion, useScroll, useTransform, MotionValue } from "framer-motion";
+import { motion, useScroll, useTransform, useReducedMotion, MotionValue } from "framer-motion";
 import { MessageCircle, Hash, Sparkles } from "lucide-react";
 
 type Star = { cx: number; cy: number; r: number; delay: string };
@@ -14,6 +14,7 @@ type Star = { cx: number; cy: number; r: number; delay: string };
  */
 export function HeroScene() {
   const ref = React.useRef<HTMLDivElement>(null);
+  const reduce = useReducedMotion();
   const { scrollYProgress } = useScroll({
     target: ref,
     offset: ["start start", "end start"],
@@ -26,17 +27,35 @@ export function HeroScene() {
   const ridge3Y = useTransform(scrollYProgress, [0, 1], [0, 150]);
   const fadeOut = useTransform(scrollYProgress, [0, 0.8], [1, 0]);
 
+  // On phones the scroll-linked parallax recomposites 6 layers every frame and
+  // backdrop-blurred bubbles are costly — that's the "laggy" feeling. Detect a
+  // small screen (or reduced-motion) and render a lighter, static scene.
+  const [isMobile, setIsMobile] = React.useState(false);
+  React.useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const apply = () => setIsMobile(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  const lite = !!reduce || isMobile;
+
+  // Generate the full set once on the client (random ⇒ must be client-only to
+  // avoid hydration mismatch), then show fewer on phones to cut animated nodes.
   const [stars, setStars] = React.useState<Star[]>([]);
   React.useEffect(() => {
-    setStars(
-      Array.from({ length: 70 }, () => ({
-        cx: Math.random() * 1440,
-        cy: Math.random() * 460,
-        r: Math.random() * 1.6 + 0.4,
-        delay: `${Math.random() * 4}s`,
-      }))
-    );
+    const generate = () =>
+      setStars(
+        Array.from({ length: 70 }, () => ({
+          cx: Math.random() * 1440,
+          cy: Math.random() * 460,
+          r: Math.random() * 1.6 + 0.4,
+          delay: `${Math.random() * 4}s`,
+        }))
+      );
+    generate();
   }, []);
+  const visibleStars = isMobile ? stars.slice(0, 28) : stars;
 
   return (
     <div ref={ref} aria-hidden className="absolute inset-0 overflow-hidden">
@@ -55,7 +74,7 @@ export function HeroScene() {
         viewBox="0 0 1440 480"
         preserveAspectRatio="xMidYMin slice"
       >
-        {stars.map((s, i) => (
+        {visibleStars.map((s, i) => (
           <circle
             key={i}
             cx={s.cx}
@@ -70,7 +89,7 @@ export function HeroScene() {
 
       {/* glowing moon */}
       <motion.div
-        style={{ y: moonY, opacity: fadeOut }}
+        style={lite ? undefined : { y: moonY, opacity: fadeOut }}
         className="absolute right-[14%] top-[12%] sm:right-[18%]"
       >
         <div className="relative grid place-items-center">
@@ -95,12 +114,13 @@ export function HeroScene() {
         </div>
       </motion.div>
 
-      {/* floating chat bubbles */}
-      <FloatingBubbles progress={scrollYProgress} />
+      {/* floating chat bubbles — skipped on phones (blur cost + they crowd the
+          hero copy on narrow screens) */}
+      {!lite && <FloatingBubbles progress={scrollYProgress} />}
 
       {/* ridge 3 — farthest, lightest */}
       <motion.svg
-        style={{ y: ridge3Y }}
+        style={lite ? undefined : { y: ridge3Y }}
         className="absolute inset-x-0 bottom-0 h-[58%] w-full"
         viewBox="0 0 1440 420"
         preserveAspectRatio="xMidYMax slice"
@@ -113,7 +133,7 @@ export function HeroScene() {
 
       {/* ridge 2 — mid */}
       <motion.svg
-        style={{ y: ridge2Y }}
+        style={lite ? undefined : { y: ridge2Y }}
         className="absolute inset-x-0 bottom-0 h-[48%] w-full"
         viewBox="0 0 1440 360"
         preserveAspectRatio="xMidYMax slice"
@@ -126,7 +146,7 @@ export function HeroScene() {
 
       {/* ridge 1 — nearest, darkest, with a pine forest on the crest */}
       <motion.svg
-        style={{ y: ridge1Y }}
+        style={lite ? undefined : { y: ridge1Y }}
         className="absolute inset-x-0 bottom-0 h-[40%] w-full"
         viewBox="0 0 1440 300"
         preserveAspectRatio="xMidYMax slice"
