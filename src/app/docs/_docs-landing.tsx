@@ -134,7 +134,7 @@ export function DocsLanding({ bots }: { bots: Bot[] }) {
           <div className="flex items-center gap-2 text-sm font-medium text-secondary">
             <BookOpen className="size-4" /> DOCUMENTATION
           </div>
-          <h1 className="mt-4 max-w-3xl font-display text-5xl font-black leading-[0.95] tracking-tight sm:text-7xl lg:text-8xl text-balance">
+          <h1 className="mt-4 max-w-3xl font-display text-4xl font-black leading-[0.98] tracking-tight sm:text-7xl lg:text-8xl text-balance">
             Build, deploy, and run your server.
           </h1>
           <p className="mt-6 max-w-xl text-lg text-muted-foreground sm:text-xl text-pretty">

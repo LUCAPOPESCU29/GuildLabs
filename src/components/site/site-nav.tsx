@@ -69,13 +69,13 @@ export function SiteNav({ floating = false }: { floating?: boolean }) {
               : "color-mix(in oklab, var(--card) 60%, transparent)",
           }}
           transition={reduce ? { duration: 0 } : { duration: 0.25, ease: EASE_EXPO }}
-          className="nav-blur mx-auto flex max-w-6xl items-center justify-between gap-3 rounded-full px-3 py-2"
+          className="nav-blur mx-auto flex max-w-6xl items-center justify-between gap-2 rounded-full px-3 py-2 sm:gap-3"
           style={{ boxShadow: scrolled ? "var(--card-shadow)" : "none" }}
         >
           {/* Left — logo + desktop nav */}
           <div className="flex items-center gap-1">
             <Link href="/" aria-label="GuildLabs home" className="mx-1 shrink-0">
-              <GuildLabsLogo className="h-8 w-auto" />
+              <GuildLabsLogo className="h-7 w-auto sm:h-8" />
             </Link>
             <span aria-hidden className="mx-1 hidden h-5 w-px bg-foreground/15 md:block" />
             <nav className="hidden items-center gap-0.5 md:flex" aria-label="Primary">

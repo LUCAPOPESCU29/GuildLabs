@@ -154,7 +154,7 @@ function CompactPill({
       transition={{ duration: 0.12 }}
       onClick={onPrimary}
       type="button"
-      className="group flex items-center gap-3 px-3 py-2 text-[13px] font-medium cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+      className="group flex items-center gap-2 px-2.5 py-2 text-[13px] font-medium cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:gap-3 sm:px-3"
       aria-label={user ? "Open server switcher" : "Sign in with Discord"}
     >
       {user ? (
@@ -165,11 +165,10 @@ function CompactPill({
             <span className="font-bold tabular-nums">Online</span>
           </div>
 
-          {/* MIDDLE DOT separator */}
-          <span className="size-1 shrink-0 rounded-full bg-white/30" />
-
-          {/* RIGHT INFO — like "in 55m" */}
-          <span className="text-white/90">
+          {/* MIDDLE DOT + server count — hidden on phones so the navbar can't
+              overflow; the count is in the expanded card a tap away. */}
+          <span className="hidden size-1 shrink-0 rounded-full bg-white/30 sm:block" />
+          <span className="hidden text-white/90 sm:inline">
             {guildsCount} {guildsCount === 1 ? "server" : "servers"}
           </span>
         </>
