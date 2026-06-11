@@ -2,15 +2,17 @@
 
 import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useGSAP } from "@gsap/react";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { GSAP_EASE } from "@/lib/motion";
 import {
   Hash,
   Volume2,
   Check,
-  Loader2,
   ShieldCheck,
   Users,
   Sparkles,
-  Plus,
   ArrowRight,
   Megaphone,
   MessageSquare,
@@ -19,6 +21,8 @@ import {
   Crown,
 } from "lucide-react";
 import { DiscordIcon } from "@/components/icons/discord";
+
+gsap.registerPlugin(ScrollTrigger, useGSAP);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helper: cycle hook — returns an integer that increments every `ms`
@@ -50,6 +54,88 @@ function Eyebrow({ children, color }: { children: React.ReactNode; color: string
 // MAIN COMPONENT
 // ────────────────────────────────────────────────────────────────────────────
 export function Showcase() {
+  const storyRef = React.useRef<HTMLDivElement>(null);
+  const railRef = React.useRef<HTMLDivElement>(null);
+
+  // Scroll-driven storytelling: a blueprint "spine" draws down the middle as
+  // you scroll, demo panels float in 3D with a scrubbed parallax, copy rises
+  // in once. Desktop gets the scrub; mobile gets cheap once-reveals; reduced
+  // motion gets nothing (content is in the server HTML either way).
+  useGSAP(
+    () => {
+      const mm = gsap.matchMedia();
+      mm.add(
+        {
+          desktop: "(min-width: 1024px) and (prefers-reduced-motion: no-preference)",
+          mobile: "(max-width: 1023px) and (prefers-reduced-motion: no-preference)",
+        },
+        (ctx) => {
+          const desktop = !!ctx.conditions?.desktop;
+          const blocks = gsap.utils.toArray<HTMLElement>("[data-story-block]", storyRef.current);
+
+          blocks.forEach((block) => {
+            const demo = block.querySelector<HTMLElement>("[data-story-demo]");
+            const copy = block.querySelector<HTMLElement>("[data-story-copy]");
+            if (copy) {
+              gsap.from(copy, {
+                y: 36,
+                opacity: 0,
+                duration: 0.7,
+                ease: GSAP_EASE,
+                scrollTrigger: { trigger: block, start: "top 78%", once: true },
+              });
+            }
+            if (!demo) return;
+            if (desktop) {
+              // scrubbed 3D drift — the panel tips upright as it crosses the viewport
+              gsap.fromTo(
+                demo,
+                { y: 90, rotateX: 9, transformPerspective: 1000 },
+                {
+                  y: -50,
+                  rotateX: 0,
+                  ease: "none",
+                  scrollTrigger: { trigger: block, start: "top bottom", end: "bottom top", scrub: 0.6 },
+                }
+              );
+            } else {
+              gsap.from(demo, {
+                y: 28,
+                opacity: 0,
+                duration: 0.6,
+                ease: GSAP_EASE,
+                scrollTrigger: { trigger: block, start: "top 82%", once: true },
+              });
+            }
+          });
+
+          // blueprint spine draws with scroll (desktop only — it runs through
+          // the center gap of the two-column blocks)
+          if (desktop && railRef.current) {
+            gsap.fromTo(
+              railRef.current,
+              { scaleY: 0 },
+              {
+                scaleY: 1,
+                ease: "none",
+                scrollTrigger: {
+                  // the spine's own wrapper (the two 2-col beats), not the
+                  // whole story — the features grid below has no center gap
+                  trigger: railRef.current.parentElement,
+                  start: "top 70%",
+                  end: "bottom 80%",
+                  scrub: 0.4,
+                },
+              }
+            );
+          }
+        }
+      );
+      return () => mm.revert();
+    },
+    { scope: storyRef }
+  );
+
   return (
     <section className="relative overflow-hidden bg-background py-28 text-foreground">
       <BackgroundGrid />
@@ -64,10 +150,32 @@ export function Showcase() {
           </h2>
         </div>
 
-        <div className="space-y-32">
-          <InviteBlock />
-          <DeployBlock />
-          <FeaturesBlock />
+        <div ref={storyRef}>
+          {/* the two 2-column story beats share a blueprint spine down the
+              center gap — it draws in as the story scrolls */}
+          <div className="relative">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-px -translate-x-1/2 lg:block"
+            >
+              <div
+                ref={railRef}
+                className="h-full w-full origin-top"
+                style={{
+                  background:
+                    "linear-gradient(to bottom, var(--primary), var(--accent) 55%, var(--coral))",
+                  boxShadow: "0 0 12px 1px color-mix(in oklab, var(--primary) 35%, transparent)",
+                }}
+              />
+            </div>
+            <div className="space-y-32">
+              <InviteBlock />
+              <DeployBlock />
+            </div>
+          </div>
+          <div className="mt-32">
+            <FeaturesBlock />
+          </div>
         </div>
       </div>
     </section>
@@ -79,8 +187,8 @@ export function Showcase() {
 // ────────────────────────────────────────────────────────────────────────────
 function InviteBlock() {
   return (
-    <div className="grid items-center gap-12 lg:grid-cols-2">
-      <div>
+    <div data-story-block className="grid items-center gap-12 lg:grid-cols-2">
+      <div data-story-copy>
         <Eyebrow color="#a78bfa">01 — One-click invite</Eyebrow>
         <h3 className="mt-4 font-display text-4xl font-black leading-tight tracking-tight text-foreground">
           Add GuildLabs to your server in 10 seconds.
@@ -110,7 +218,7 @@ function InviteDemo() {
   const stage = useCycle(2400, 4);
 
   return (
-    <div className="relative">
+    <div data-story-demo className="relative will-change-transform">
       <div className="rounded-3xl border border-white/10 bg-[#1a1c24] p-6 shadow-[0_30px_80px_-30px_rgba(167,139,250,0.45)]">
         {/* Mock Discord OAuth permissions card */}
         <div className="rounded-2xl border border-white/5 bg-black/40 p-5">
@@ -261,9 +369,9 @@ const BLUEPRINT_CATS = [
 
 function DeployBlock() {
   return (
-    <div className="grid items-center gap-12 lg:grid-cols-2">
+    <div data-story-block className="grid items-center gap-12 lg:grid-cols-2">
       <DeployDemo />
-      <div className="lg:order-first">
+      <div data-story-copy className="lg:order-first">
         <Eyebrow color="#10b981">02 — Blueprint deployment</Eyebrow>
         <h3 className="mt-4 font-display text-4xl font-black leading-tight tracking-tight text-foreground">
           From JSON to live server in seconds.
@@ -298,7 +406,10 @@ function DeployDemo() {
   const channelsRevealed = stage; // 0..6
 
   return (
-    <div className="relative rounded-3xl border border-white/10 bg-[#1a1c24] p-3 shadow-[0_30px_80px_-30px_rgba(134,239,172,0.35)]">
+    <div
+      data-story-demo
+      className="relative rounded-3xl border border-white/10 bg-[#1a1c24] p-3 shadow-[0_30px_80px_-30px_rgba(134,239,172,0.35)] will-change-transform"
+    >
       <div className="flex h-[26rem] overflow-hidden rounded-2xl bg-[#0a0a0c]">
         {/* Mock Discord channel sidebar */}
         <div className="flex w-full flex-col">
@@ -389,8 +500,8 @@ function DeployDemo() {
 // ────────────────────────────────────────────────────────────────────────────
 function FeaturesBlock() {
   return (
-    <div>
-      <div className="mb-12 max-w-2xl">
+    <div data-story-block>
+      <div data-story-copy className="mb-12 max-w-2xl">
         <Eyebrow color="#6366f1">03 — Features that run themselves</Eyebrow>
         <h3 className="mt-4 font-display text-4xl font-black leading-tight tracking-tight text-foreground">
           Five powerful features. Zero external services.
@@ -401,7 +512,7 @@ function FeaturesBlock() {
         </p>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-3">
+      <div data-story-demo className="grid gap-5 will-change-transform md:grid-cols-3">
         <FeatureCard
           title="Welcome flow"
           desc="Every new member gets a custom embed with placeholders like {user} and {server}."
@@ -543,8 +654,13 @@ function VerifyDemo() {
                   <Check className="size-3.5" strokeWidth={3} /> Verified
                 </motion.span>
               ) : (
-                <motion.span key="verify" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                  ✅ Verify Me
+                <motion.span
+                  key="verify"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="size-3.5" /> Verify Me
                 </motion.span>
               )}
             </AnimatePresence>

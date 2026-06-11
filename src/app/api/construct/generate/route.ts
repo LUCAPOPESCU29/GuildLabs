@@ -7,7 +7,7 @@ import {
   type ConstructError,
 } from "@/lib/construct-ai";
 import { callGroq, isGroqConfigured, GroqError } from "@/lib/groq";
-import { rateLimit, clientIp, sweepExpired } from "@/lib/rate-limit";
+import { rateLimit, clientIp, sweepExpired, bodyTooLarge } from "@/lib/rate-limit";
 import { validateBlueprint, BlueprintInvalid } from "@/lib/blueprint-validate";
 import { fallbackBlueprint } from "@/lib/construct-fallback";
 import type { Blueprint } from "@/lib/blueprint";
@@ -27,6 +27,9 @@ export async function POST(req: NextRequest) {
   const limit = rateLimit(`generate:${clientIp(req)}`, 12, 60_000);
   if (!limit.ok) {
     return fail("rate_limited", "Too many requests — give it a moment.", 429);
+  }
+  if (bodyTooLarge(req)) {
+    return fail("bad_request", "Request body is too large.", 413);
   }
 
   const body = await req.json().catch(() => null);

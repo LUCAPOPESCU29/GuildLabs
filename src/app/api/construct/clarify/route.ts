@@ -8,7 +8,7 @@ import {
   type ClarifyQuestion,
 } from "@/lib/construct-ai";
 import { callGroq, isGroqConfigured } from "@/lib/groq";
-import { rateLimit, clientIp, sweepExpired } from "@/lib/rate-limit";
+import { rateLimit, clientIp, sweepExpired, bodyTooLarge } from "@/lib/rate-limit";
 import { fallbackClarify } from "@/lib/construct-fallback";
 
 export const runtime = "nodejs";
@@ -55,6 +55,9 @@ export async function POST(req: NextRequest) {
       { done: true } satisfies ClarifyResult,
       { status: 429, headers: { "Retry-After": String(limit.retryAfter) } }
     );
+  }
+  if (bodyTooLarge(req)) {
+    return NextResponse.json({ error: "Request body is too large." }, { status: 413 });
   }
 
   const body = await req.json().catch(() => null);

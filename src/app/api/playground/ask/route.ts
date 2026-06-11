@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callGroq, isGroqConfigured, GroqError } from "@/lib/groq";
-import { rateLimit, clientIp, sweepExpired } from "@/lib/rate-limit";
+import { rateLimit, clientIp, sweepExpired, bodyTooLarge } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -27,6 +27,9 @@ export async function POST(req: NextRequest) {
   const limit = rateLimit(`ask:${clientIp(req)}`, 20, 60_000);
   if (!limit.ok) {
     return NextResponse.json({ answer: "Slow down a moment — too many questions." });
+  }
+  if (bodyTooLarge(req, 16_000)) {
+    return NextResponse.json({ error: "Request body is too large." }, { status: 413 });
   }
 
   const body = await req.json().catch(() => null);

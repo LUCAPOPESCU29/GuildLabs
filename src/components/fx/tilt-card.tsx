@@ -58,7 +58,7 @@ export function TiltCard({
     ry.set(0);
   }, [rx, ry]);
 
-  if (reduce) return <div className={className}>{children}</div>;
+  if (reduce) return <div className={cn("relative", className)}>{children}</div>;
 
   return (
     <motion.div

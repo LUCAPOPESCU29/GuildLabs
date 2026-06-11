@@ -28,12 +28,11 @@ export async function GET(
       },
     });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Couldn't load that ticker.";
+    // Log the upstream detail server-side; never echo internals to the client.
+    console.error(`[chart] ${raw} failed:`, err instanceof Error ? err.message : err);
     return NextResponse.json(
       {
         error: `No data for "${raw}". Check the ticker (e.g. AAPL, MSFT, BTC-USD) — the source may also be briefly rate-limited.`,
-        detail: message,
       },
       { status: 502 }
     );
