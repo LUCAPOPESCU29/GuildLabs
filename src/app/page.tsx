@@ -31,18 +31,12 @@ import { TickerSearch } from "@/components/ticker-search";
 import { TickerMarquee } from "@/components/ticker-marquee";
 import { AnimatedHeading } from "@/components/motion/animated-heading";
 import { SpotlightCard } from "@/components/fx/spotlight-card";
+import { TiltCard } from "@/components/fx/tilt-card";
+import { BotSlides, type BotSlide } from "@/components/sections/bot-slides";
 import { CountUp } from "@/components/motion/count-up";
 import Link from "next/link";
 
-type Bot = {
-  name: string;
-  href: string;
-  glow: string;
-  icon: React.ComponentType<{ className?: string }>;
-  body: string;
-};
-
-const BOTS: Bot[] = [
+const BOTS: BotSlide[] = [
   {
     name: "Construct",
     href: "/bots/construct",
@@ -243,16 +237,15 @@ export default function Home() {
                   body: "The Construct bot builds it in your server in seconds. Or download the blueprint as JSON and keep it.",
                 },
               ].map((s) => (
-                <SpotlightCard
-                  key={s.step}
-                  className="card-hover rounded-3xl border-2 border-card-border bg-card p-6"
-                >
-                  <span className="font-mono text-6xl font-black leading-none tabular-nums text-primary/15 transition-colors duration-300 group-hover:text-primary/30">
-                    {s.step}
-                  </span>
-                  <h3 className="mt-3 font-display text-xl font-black">{s.title}</h3>
-                  <p className="mt-2 text-sm text-muted-foreground">{s.body}</p>
-                </SpotlightCard>
+                <TiltCard key={s.step} max={6} className="h-full">
+                  <SpotlightCard className="card-hover h-full rounded-3xl border-2 border-card-border bg-card p-6">
+                    <span className="font-mono text-6xl font-black leading-none tabular-nums text-primary/15 transition-colors duration-300 group-hover:text-primary/30">
+                      {s.step}
+                    </span>
+                    <h3 className="mt-3 font-display text-xl font-black">{s.title}</h3>
+                    <p className="mt-2 text-sm text-muted-foreground">{s.body}</p>
+                  </SpotlightCard>
+                </TiltCard>
               ))}
             </div>
           </div>
@@ -334,10 +327,11 @@ export default function Home() {
               </div>
             </div>
 
-            {/* chat mock (Discord-style, forced dark) */}
+            {/* chat mock (Discord-style, forced dark) — floats in 3D toward the cursor */}
             <div className="dark">
-              <div className="glass-strong overflow-hidden rounded-3xl p-3">
-                <div className="rounded-2xl bg-background-deep/80 p-4">
+              <TiltCard glare max={8} perspective={1100} className="rounded-3xl">
+                <div className="glass-strong rounded-3xl p-3 [transform-style:preserve-3d]">
+                  <div className="rounded-2xl bg-background-deep/80 p-4 [transform-style:preserve-3d]">
                   {/* user */}
                   <div className="flex gap-3">
                     <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted font-display text-xs font-bold text-foreground">
@@ -352,18 +346,19 @@ export default function Home() {
                   </div>
 
                   {/* bot */}
-                  <div className="mt-4 flex gap-3">
+                  <div className="mt-4 flex gap-3 [transform-style:preserve-3d]">
                     <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground">
                       <Bot className="size-4" />
                     </span>
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 [transform-style:preserve-3d]">
                       <div className="flex items-center gap-2">
                         <span className="font-display text-sm font-bold text-foreground">GuildLabs</span>
                         <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wider text-primary">
                           Bot
                         </span>
                       </div>
-                      <div className="mt-1.5 rounded-xl border-l-4 border-primary bg-card p-3">
+                      {/* the embed floats above the chat surface when the card tilts */}
+                      <div className="mt-1.5 rounded-xl border-l-4 border-primary bg-card p-3 shadow-[var(--elevation-1)] [transform:translateZ(32px)]">
                         <div className="flex items-center gap-1.5 text-[0.65rem] font-semibold text-secondary">
                           <Boxes className="size-3.5" /> CONSTRUCT BLUEPRINT
                         </div>
@@ -387,8 +382,9 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
+                  </div>
                 </div>
-              </div>
+              </TiltCard>
             </div>
           </div>
         </Reveal>
@@ -406,38 +402,8 @@ export default function Home() {
               GuildLabs is a small studio of free, open-source Discord bots. Each one
               solves a single problem properly.
             </p>
-            <div className="mt-10 grid gap-4 sm:grid-cols-3">
-              {BOTS.map((b) => {
-                const Icon = b.icon;
-                return (
-                  <SpotlightCard
-                    key={b.name}
-                    href={b.href}
-                    glow={b.glow}
-                    className="card-hover rounded-3xl border-2 border-card-border bg-card p-6"
-                  >
-                    <span
-                      className="grid size-11 place-items-center rounded-xl transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:scale-105"
-                      style={{
-                        background: `color-mix(in oklab, ${b.glow} 14%, transparent)`,
-                        color: b.glow,
-                      }}
-                    >
-                      <Icon className="size-5" />
-                    </span>
-                    <h3 className="mt-4 font-display text-xl font-black">{b.name}</h3>
-                    <p className="mt-2 text-sm text-muted-foreground">{b.body}</p>
-                    <span
-                      className="mt-4 inline-flex items-center gap-1 text-sm font-semibold"
-                      style={{ color: b.glow }}
-                    >
-                      Learn more{" "}
-                      <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-                    </span>
-                  </SpotlightCard>
-                );
-              })}
-            </div>
+            {/* 3D interactive slides — drag, click a side card, or use the arrows */}
+            <BotSlides bots={BOTS} />
           </div>
         </Reveal>
       </section>
