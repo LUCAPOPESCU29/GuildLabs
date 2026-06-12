@@ -17,6 +17,86 @@ export const PERM_PRESETS: Record<PermPreset, string> = {
   view: "View channels only",
 };
 
+/* Exact Discord permission flags (discord.js PermissionFlagsBits names) per
+   preset. These are what actually gets sent to the deploy API — the human
+   strings above are display-only. Keep every name a valid discord.js v14 flag. */
+const MEMBER_FLAGS = [
+  "ViewChannel",
+  "SendMessages",
+  "ReadMessageHistory",
+  "AddReactions",
+  "SendMessagesInThreads",
+  "UseApplicationCommands",
+  "Connect",
+  "Speak",
+];
+
+export const PERM_FLAGS: Record<PermPreset, string[]> = {
+  admin: ["Administrator"],
+  mod: [
+    ...MEMBER_FLAGS,
+    "ManageMessages",
+    "ManageThreads",
+    "KickMembers",
+    "BanMembers",
+    "ModerateMembers",
+    "MuteMembers",
+    "DeafenMembers",
+    "MoveMembers",
+    "ManageNicknames",
+    "EmbedLinks",
+    "AttachFiles",
+  ],
+  trusted: [
+    ...MEMBER_FLAGS,
+    "EmbedLinks",
+    "AttachFiles",
+    "UseExternalEmojis",
+    "CreatePublicThreads",
+    "Stream",
+  ],
+  member: MEMBER_FLAGS,
+  view: ["ViewChannel", "ReadMessageHistory"],
+};
+
+/* Keyword fallbacks for free-text perms (custom roles like
+   "Manage class channels" or "Team A voice + chat"). Added ON TOP of the
+   member baseline so a custom role is never created powerless. */
+const PERM_KEYWORD_FLAGS: [RegExp, string[]][] = [
+  [/manage.*(server|guild)/i, ["ManageGuild"]],
+  [/manage.*channel/i, ["ManageChannels"]],
+  [/manage.*role/i, ["ManageRoles"]],
+  [/manage.*(message|support|class|ticket)/i, ["ManageMessages", "ManageThreads"]],
+  [/\bkick\b/i, ["KickMembers"]],
+  [/\bban\b/i, ["BanMembers"]],
+  [/\b(mute|timeout|moderat)/i, ["ModerateMembers", "MuteMembers"]],
+  [/\b(embed|link)/i, ["EmbedLinks"]],
+  [/\b(attach|file|upload|image|media)/i, ["AttachFiles"]],
+  [/\b(react|emoji)/i, ["AddReactions", "UseExternalEmojis"]],
+  [/\b(stream|video|screen)/i, ["Stream"]],
+  [/\bthread/i, ["CreatePublicThreads"]],
+  [/mention.*every/i, ["MentionEveryone"]],
+];
+
+/** Resolve a role's perms (preset key, preset string, or free text) into
+ *  explicit Discord permission flag names. Never returns an empty list. */
+export function permsToFlags(perms: string): string[] {
+  const text = (perms ?? "").trim();
+  // Preset key ("mod") or preset display string ("Manage messages, kick, mute").
+  if (text in PERM_FLAGS) return PERM_FLAGS[text as PermPreset];
+  for (const key of Object.keys(PERM_PRESETS) as PermPreset[]) {
+    if (PERM_PRESETS[key].toLowerCase() === text.toLowerCase()) return PERM_FLAGS[key];
+  }
+  if (/\badmin/i.test(text)) return PERM_FLAGS.admin;
+  if (/view.*only|read.*only/i.test(text)) return PERM_FLAGS.view;
+  // Free text → member baseline + any keyword matches.
+  const flags = new Set(MEMBER_FLAGS);
+  for (const [re, names] of PERM_KEYWORD_FLAGS) {
+    if (re.test(text)) names.forEach((n) => flags.add(n));
+  }
+  return [...flags];
+}
+
 /* Short labels for the segmented selector in the wizard. */
 export const PERM_PRESET_LABELS: Record<PermPreset, string> = {
   admin: "Admin",
@@ -323,7 +403,10 @@ export function toJSON(state: WizardState, bp: Blueprint) {
       name: r.name,
       color: r.color,
       hoist: r.hoist,
-      permissions: r.perms,
+      // Explicit Discord flag names — the deployer applies these verbatim.
+      permissions: permsToFlags(r.perms),
+      // Human-readable summary, kept for display/debugging of exported JSON.
+      permissionsLabel: r.perms,
     })),
     permissions: bp.permissions,
   };

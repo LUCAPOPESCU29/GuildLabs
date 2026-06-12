@@ -6,7 +6,7 @@
  * Client-safe (no server-only).
  */
 
-import type { Blueprint } from "./blueprint";
+import { permsToFlags, type Blueprint } from "./blueprint";
 
 export type DeployJSON = {
   server: {
@@ -17,7 +17,15 @@ export type DeployJSON = {
     advanced: string[];
   };
   categories: { name: string; channels: { name: string; type: string }[] }[];
-  roles: { name: string; color: string; hoist: boolean; permissions: string }[];
+  roles: {
+    name: string;
+    color: string;
+    hoist: boolean;
+    /** Explicit Discord permission flag names, applied verbatim by the bot. */
+    permissions: string[];
+    /** Human-readable summary for display/debugging. */
+    permissionsLabel: string;
+  }[];
   permissions: string[];
   source: "ai";
 };
@@ -40,7 +48,8 @@ export function aiBlueprintToDeployJSON(bp: Blueprint): DeployJSON {
       name: r.name,
       color: r.color,
       hoist: r.hoist,
-      permissions: r.perms,
+      permissions: permsToFlags(r.perms),
+      permissionsLabel: r.perms,
     })),
     permissions: bp.permissions,
     source: "ai",
