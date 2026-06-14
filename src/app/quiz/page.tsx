@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 import { breadcrumbLd } from "@/lib/seo-data/jsonld";
 import { JsonLd } from "@/components/json-ld";
-import { SiteHeader } from "@/components/site/site-header";
-import { SiteFooter } from "@/components/site/site-footer";
 import { Quiz } from "./_quiz";
 
 export const metadata: Metadata = buildMetadata({
@@ -22,9 +20,7 @@ export default function QuizPage() {
           { name: "Quiz", path: "/quiz" },
         ])}
       />
-      <SiteHeader />
       <Quiz />
-      <SiteFooter />
     </>
   );
 }
