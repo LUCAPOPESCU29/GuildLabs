@@ -18,6 +18,42 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: "2026-06-14",
+    bot: "Platform",
+    title: "Free tools — and a quiz that picks your server",
+    summary:
+      "Two new free tools, no sign-up. A visual embed builder lets you design rich Discord embeds with a faithful live preview and fire a test straight to a webhook. And a 30-second quiz matches you to the right server template, then drops you into the builder ready to generate. The bot pages got real \"try it live\" widgets too, so you can chart a ticker or ask Maven a question right on the site.",
+    items: [
+      { type: "added", text: "Embed builder — multiple embeds, markdown-rendered preview, live limit checks, presets, import/export, shareable links, and a one-click webhook test" },
+      { type: "added", text: "\"What server should you build?\" quiz — an immersive, animated matcher that hands its pick straight to Construct" },
+      { type: "added", text: "Live \"try it\" demos on the ChartIt and Maven pages, hitting the same data the bots use" },
+      { type: "added", text: "A Free tools hub at /tools, linked from the nav" },
+    ],
+  },
+  {
+    date: "2026-06-14",
+    bot: "Construct",
+    title: "Deploy without leaving your server",
+    summary:
+      "Deploying used to need the site to reach your bot directly, which never worked once the bot lived anywhere but your own machine. Now it's inverted: the site gives you a short one-time code, you run /deploy with it in your server, and the bot pulls the blueprint and builds everything. We also fixed the roles it creates — they now get real Discord permissions instead of a best-guess.",
+    items: [
+      { type: "added", text: "Claim-code deploy — generate a code on the site, run /deploy in your server, done. Works no matter where the bot is hosted" },
+      { type: "fixed", text: "Deployed roles now carry explicit Discord permissions per preset — no more roles created with the wrong access or none at all" },
+    ],
+  },
+  {
+    date: "2026-06-14",
+    bot: "Platform",
+    title: "More guides, comparisons, and a sturdier codebase",
+    summary:
+      "A big content pass: deeper comparison pages, more docs, and new how-to guides — all wired into the sitemap so they're findable. Behind the scenes, a test suite now guards the builder's core logic, and the on-site Maven assistant stopped inventing pricing (everything GuildLabs makes is free).",
+    items: [
+      { type: "improved", text: "Expanded comparisons, docs, and guides, plus polish across the site" },
+      { type: "added", text: "An automated test suite covering blueprint validation, deploy, and rate-limiting" },
+      { type: "fixed", text: "Maven no longer invents paid plans — it correctly says every GuildLabs tool is free and open-source" },
+    ],
+  },
+  {
     date: "2026-06-12",
     bot: "Platform",
     title: "A homepage with depth — literally",
