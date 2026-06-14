@@ -23,6 +23,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
     // Hubs
     { url: `${base}/templates`, lastModified: now, changeFrequency: "weekly", priority: 0.9 },
+    { url: `${base}/quiz`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
+    { url: `${base}/tools`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
+    { url: `${base}/tools/embed-builder`, lastModified: now, changeFrequency: "monthly", priority: 0.75 },
     { url: `${base}/vs`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${base}/docs`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${base}/guides`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },

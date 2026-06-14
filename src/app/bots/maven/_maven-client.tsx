@@ -21,6 +21,7 @@ import { TiltCard } from "@/components/fx/tilt-card";
 import { SpotlightCard } from "@/components/fx/spotlight-card";
 import { Reveal } from "@/components/site/reveal";
 import { SectionLabel } from "@/components/site/section-label";
+import { AskDemo } from "@/components/demos/ask-demo";
 import { EASE_EXPO } from "@/lib/motion";
 
 // Maven's accent is the brand mint — token-driven so it adapts to light/dark.
@@ -165,6 +166,24 @@ export default function MavenClient() {
               </ProductWindow>
             </TiltCard>
           </motion.div>
+        </div>
+      </section>
+
+      {/* ── Try it live ───────────────────────────────────────────────────── */}
+      <section className="px-6 pb-4">
+        <div className="mx-auto max-w-5xl">
+          <Reveal className="mb-6 text-center">
+            <SectionLabel tone="accent">Try it live</SectionLabel>
+            <h2 className="mt-4 font-display text-3xl font-black tracking-tight sm:text-4xl">
+              Ask Maven <span className="hl">anything.</span>
+            </h2>
+            <p className="mt-3 text-muted-foreground">
+              The same assistant that answers in your server — give it a question.
+            </p>
+          </Reveal>
+          <Reveal>
+            <AskDemo accent={ACCENT} />
+          </Reveal>
         </div>
       </section>
 

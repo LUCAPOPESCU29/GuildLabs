@@ -20,6 +20,7 @@ import { GithubIcon } from "@/components/icons/github";
 import { TiltCard } from "@/components/fx/tilt-card";
 import { SpotlightCard } from "@/components/fx/spotlight-card";
 import { Reveal } from "@/components/site/reveal";
+import { ChartDemo } from "@/components/demos/chart-demo";
 import { EASE_EXPO } from "@/lib/motion";
 
 // ChartIt's page accent is the brand coral — token-driven so it adapts to
@@ -163,6 +164,23 @@ export default function ChartItClient() {
               </ProductWindow>
             </TiltCard>
           </motion.div>
+        </div>
+      </section>
+
+      {/* ── Try it live ───────────────────────────────────────────────────── */}
+      <section className="px-6 pb-4">
+        <div className="mx-auto max-w-5xl">
+          <Reveal className="mb-6 text-center">
+            <h2 className="font-display text-3xl font-black tracking-tight sm:text-4xl">
+              Chart any ticker, <span className="hl">right here.</span>
+            </h2>
+            <p className="mt-3 text-muted-foreground">
+              The same live data ChartIt drops in Discord — no install needed to try it.
+            </p>
+          </Reveal>
+          <Reveal>
+            <ChartDemo accent={ACCENT} />
+          </Reveal>
         </div>
       </section>
 

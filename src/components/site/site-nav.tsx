@@ -22,6 +22,7 @@ const PRODUCTS: NavGroup = {
     { label: "Maven", href: "/bots/maven", desc: "Community engagement" },
     { label: "All bots", href: "/bots", desc: "Browse the studio" },
     { label: "Templates", href: "/templates", desc: "Ready-made server setups" },
+    { label: "Server quiz", href: "/quiz", desc: "Find your perfect template" },
   ],
 };
 
@@ -29,6 +30,7 @@ const RESOURCES: NavGroup = {
   label: "Resources",
   items: [
     { label: "Playground", href: "/playground", desc: "Chat with the bot — try / commands" },
+    { label: "Free tools", href: "/tools", desc: "Embed builder & more" },
     { label: "Docs", href: "/docs", desc: "Command references" },
     { label: "Guides", href: "/guides", desc: "How-tos & playbooks" },
     { label: "Compare", href: "/vs", desc: "GuildLabs vs alternatives" },

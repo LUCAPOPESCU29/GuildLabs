@@ -109,6 +109,17 @@ export default function TemplatesHub() {
             </p>
           </HeroItem>
 
+          <HeroItem delay={0.28} className="mt-6">
+            <Link
+              href="/quiz"
+              className="group inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/15"
+            >
+              <Sparkles className="size-4" />
+              Not sure which? Take the 30-second quiz
+              <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+            </Link>
+          </HeroItem>
+
           <HeroItem delay={0.32} className="mt-8 flex flex-wrap gap-2.5">
             {PILLS.map(({ icon: Icon, label }) => (
               <span
