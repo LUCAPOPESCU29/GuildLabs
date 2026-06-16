@@ -27,6 +27,7 @@ import { Reveal } from "@/components/site/reveal";
 import { SectionLabel } from "@/components/site/section-label";
 import { BuilderModes } from "@/components/construct-ai/builder-modes";
 import { Showcase } from "@/components/sections/showcase";
+import { QueenTeaser } from "@/components/sections/queen-teaser";
 import { TickerSearch } from "@/components/ticker-search";
 import { TickerMarquee } from "@/components/ticker-marquee";
 import { AnimatedHeading } from "@/components/motion/animated-heading";
@@ -407,6 +408,9 @@ export default function Home() {
           </div>
         </Reveal>
       </section>
+
+      {/* coming soon — the 4th bot */}
+      <QueenTeaser />
 
       {/* trust */}
       <section className="px-4 py-20">

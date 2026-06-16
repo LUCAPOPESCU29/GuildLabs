@@ -18,6 +18,17 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: "2026-06-15",
+    bot: "Platform",
+    title: "Meet Queen — the studio's 4th bot (coming soon)",
+    summary:
+      "A teaser landed on the homepage for Queen, an in-server AI assistant — think ChatGPT living inside your Discord. @mention it or use /ask and it reasons in context, summarizes long threads, and is built to run on your own local model so messages never leave your server. It's distinct from Maven (which surfaces your community's own answered questions) — Queen is a general assistant. Join the waitlist to get early access.",
+    items: [
+      { type: "added", text: "Queen \"coming soon\" announcement on the homepage, with an early-access waitlist" },
+      { type: "added", text: "Privacy-first by design — Queen is built to run on a local model, so chats stay in your server" },
+    ],
+  },
+  {
     date: "2026-06-14",
     bot: "Platform",
     title: "Free tools — and a quiz that picks your server",
