@@ -96,17 +96,6 @@ export default function Home() {
           className="grain absolute inset-0"
           style={{ background: "linear-gradient(160deg, #241a4d 0%, #1a1238 52%, #0f0a22 100%)" }}
         />
-        {/* brand floating paths */}
-        <div
-          aria-hidden
-          className="absolute inset-0 opacity-70"
-          style={{
-            maskImage: "radial-gradient(120% 100% at 50% 35%, black, transparent 85%)",
-            WebkitMaskImage: "radial-gradient(120% 100% at 50% 35%, black, transparent 85%)",
-          }}
-        >
-          <BackgroundPaths />
-        </div>
         {/* soft glows */}
         <div aria-hidden className="pointer-events-none absolute -right-10 top-6 size-[28rem] rounded-full opacity-25 blur-3xl" style={{ background: "var(--secondary)" }} />
         <div aria-hidden className="pointer-events-none absolute -bottom-24 -left-16 size-96 rounded-full opacity-20 blur-3xl" style={{ background: "var(--accent)" }} />
@@ -115,7 +104,7 @@ export default function Home() {
         <span className="absolute left-[40%] top-[18%] size-1.5 rounded-full bg-white/60 animate-twinkle [animation-delay:1.1s]" />
         <span className="absolute right-[26%] bottom-[28%] size-1 rounded-full bg-white/50 animate-twinkle [animation-delay:0.6s]" />
 
-        <div className="relative mx-auto grid w-full max-w-6xl items-center gap-8 lg:grid-cols-[1.05fr,0.95fr]">
+        <div className="relative mx-auto grid w-full max-w-6xl items-center gap-8 md:grid-cols-2">
           <motion.div
             initial="hidden"
             animate="show"
@@ -161,17 +150,28 @@ export default function Home() {
             </motion.div>
           </motion.div>
 
-          {/* the robot — follows your cursor, click it 👀 */}
+          {/* the robot + paths — a panel on the side */}
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.7, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            className="mx-auto flex flex-col items-center"
+            className="relative mx-auto flex w-full max-w-[440px] flex-col items-center"
           >
-            <div className="h-[300px] w-full max-w-[340px] sm:h-[380px] sm:max-w-[380px]">
+            {/* brand floating paths, localized behind the robot */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 opacity-80"
+              style={{
+                maskImage: "radial-gradient(75% 75% at 50% 45%, black, transparent 78%)",
+                WebkitMaskImage: "radial-gradient(75% 75% at 50% 45%, black, transparent 78%)",
+              }}
+            >
+              <BackgroundPaths />
+            </div>
+            <div className="relative z-10 h-[320px] w-full max-w-[360px] sm:h-[420px] sm:max-w-[400px]">
               <GuildBot3D />
             </div>
-            <span className="mt-1 text-xs font-medium uppercase tracking-widest text-white/40">
+            <span className="relative z-10 mt-1 text-xs font-medium uppercase tracking-widest text-white/40">
               Say hi — it follows your cursor
             </span>
           </motion.div>
