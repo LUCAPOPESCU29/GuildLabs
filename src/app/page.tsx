@@ -28,6 +28,7 @@ import { SectionLabel } from "@/components/site/section-label";
 import { BuilderModes } from "@/components/construct-ai/builder-modes";
 import { Showcase } from "@/components/sections/showcase";
 import { QueenTeaser } from "@/components/sections/queen-teaser";
+import { RobotCta } from "@/components/sections/robot-cta";
 import { TickerSearch } from "@/components/ticker-search";
 import { TickerMarquee } from "@/components/ticker-marquee";
 import { AnimatedHeading } from "@/components/motion/animated-heading";
@@ -459,72 +460,9 @@ export default function Home() {
         <BuilderModes />
       </section>
 
-      {/* final cta — night-sky band (cohesive with the hero painting), now a
-          3D object: the band tilts toward the cursor and the content floats
-          at different depths above the painted sky */}
-      <section className="px-4 py-20">
-        <Reveal>
-          <TiltCard max={4} glare perspective={1400} className="mx-auto max-w-6xl rounded-[2.5rem]">
-            {/* painted-sky background — its own clipped layer so the depth
-                transforms above stay un-flattened */}
-            <div
-              aria-hidden
-              className="grain absolute inset-0 overflow-hidden rounded-[2.5rem]"
-              style={{
-                background:
-                  "linear-gradient(155deg, var(--sky-top) 0%, var(--sky-mid) 52%, var(--sky-low) 100%)",
-              }}
-            >
-              {/* blueprint dot-grid */}
-              <div
-                className="pointer-events-none absolute inset-0 opacity-[0.14]"
-                style={{
-                  backgroundImage: "radial-gradient(circle, white 1px, transparent 1.4px)",
-                  backgroundSize: "22px 22px",
-                  maskImage: "radial-gradient(120% 100% at 50% 0%, black, transparent 75%)",
-                  WebkitMaskImage: "radial-gradient(120% 100% at 50% 0%, black, transparent 75%)",
-                }}
-              />
-              {/* moon + accent glow */}
-              <div className="pointer-events-none absolute -right-16 -top-20 size-72 rounded-full opacity-30 blur-3xl" style={{ background: "var(--moon)" }} />
-              <div className="pointer-events-none absolute -bottom-24 -left-16 size-80 rounded-full opacity-25 blur-3xl" style={{ background: "var(--accent)" }} />
-              {/* twinkling stars */}
-              <span className="absolute left-[12%] top-[22%] size-1 rounded-full bg-white/80 animate-twinkle" />
-              <span className="absolute right-[18%] top-[30%] size-1.5 rounded-full bg-white/70 animate-twinkle [animation-delay:1.2s]" />
-              <span className="absolute left-[24%] bottom-[26%] size-1 rounded-full bg-white/60 animate-twinkle [animation-delay:0.6s]" />
-            </div>
-
-            <div className="relative px-6 py-20 text-center text-white [transform-style:preserve-3d] sm:py-28">
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1 text-[0.72rem] font-black uppercase tracking-[0.14em] backdrop-blur-sm [transform:translateZ(30px)]">
-                <Sparkles className="size-3.5 text-accent" /> Free forever
-              </span>
-              <h2 className="mt-6 font-display text-5xl font-black leading-[0.92] tracking-tight sm:text-7xl lg:text-8xl text-balance [transform:translateZ(55px)]">
-                Build the server you
-                <br />
-                <span className="text-accent">actually wanted.</span>
-              </h2>
-              <p className="mx-auto mt-6 max-w-xl text-lg text-white/75 text-pretty [transform:translateZ(35px)]">
-                Pick your choices, review the blueprint, deploy. A few minutes — and it costs
-                nothing.
-              </p>
-              <div className="mt-9 flex flex-col justify-center gap-3 [transform:translateZ(70px)] sm:flex-row">
-                <Button size="lg" variant="accent" magnetic onClick={scrollToBuilder}>
-                  <MousePointerClick className="size-5" /> Build my server — free
-                </Button>
-                <Link href="/templates">
-                  <Button
-                    size="lg"
-                    variant="glass"
-                    className="!border-white/30 !bg-white/10 !text-white hover:!bg-white/20"
-                  >
-                    <Download className="size-5" /> Download a blueprint first
-                  </Button>
-                </Link>
-              </div>
-            </div>
-          </TiltCard>
-        </Reveal>
-      </section>
+      {/* final cta — the GuildLabs robot mascot on a band of brand-colored
+          floating paths (replaces the old painted night-sky panel) */}
+      <RobotCta />
 
       {/* footer */}
       <footer className="border-t border-card-border px-4 py-12">
