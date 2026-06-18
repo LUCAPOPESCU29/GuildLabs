@@ -41,14 +41,24 @@ const CSS = `
 .gl-smile{ position:absolute; left:50%; top:78px; width:64px; height:30px; transform:translateX(-50%); border:6px solid #3FE3A3; border-top:none; border-radius:0 0 60px 60px; box-shadow:0 0 10px rgba(63,227,163,.5); }
 .gl-shadow{ position:absolute; left:50%; bottom:34px; width:200px; height:34px; margin-left:-100px; background:radial-gradient(50% 50% at 50% 50%, rgba(40,18,90,.45), rgba(40,18,90,0) 70%); border-radius:50%; animation:gl-shadow 5.5s ease-in-out infinite; }
 @keyframes gl-shadow{ 0%,100%{transform:scale(1);opacity:.55} 50%{transform:scale(.82);opacity:.35} }
+.gl-celebrate{ position:absolute; inset:0; transform-style:preserve-3d; }
+.gl-spark{ position:absolute; left:50%; top:42%; width:11px; height:11px; border-radius:50%; pointer-events:none; z-index:20; }
+.gl-bubble{ position:absolute; left:50%; top:2px; z-index:30; transform:translateX(-50%); padding:7px 13px; border-radius:15px; background:#fff; color:#2A1B4A; font-weight:800; font-size:13px; line-height:1; white-space:nowrap; box-shadow:0 10px 26px rgba(40,18,90,.4); animation:gl-pop .26s cubic-bezier(.34,1.56,.64,1); }
+.gl-bubble::after{ content:""; position:absolute; left:50%; bottom:-6px; width:14px; height:14px; background:#fff; transform:translateX(-50%) rotate(45deg); border-radius:3px; }
+@keyframes gl-pop{ from{transform:translateX(-50%) scale(.5); opacity:0} to{transform:translateX(-50%) scale(1); opacity:1} }
 @media (prefers-reduced-motion:reduce){ .gl-bot{animation:none} .gl-shadow{animation:none} }
 `;
+
+const QUIPS = ["Let's build! 🚀", "👑", "Beep boop ✨", "Hi there!", "To the server!", "gm ☀️", "Nice click 😄", "Free forever 💜"];
 
 export function GuildBot3D({ className = "" }: { className?: string }) {
   const reduce = useReducedMotion();
   const sceneRef = React.useRef<HTMLDivElement>(null);
   const botRef = React.useRef<HTMLDivElement>(null);
   const eyesRef = React.useRef<HTMLDivElement>(null);
+  const celebrateRef = React.useRef<HTMLDivElement>(null);
+  const bubbleTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [quip, setQuip] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const scene = sceneRef.current;
@@ -91,54 +101,91 @@ export function GuildBot3D({ className = "" }: { className?: string }) {
     };
     blinkTimers.push(setTimeout(blink, 1800));
 
-    const onClick = () => {
-      bot.animate(
-        [
-          { transform: bot.style.transform + " translateY(0)" },
-          { transform: bot.style.transform + " translateY(-40px)" },
-          { transform: bot.style.transform + " translateY(0)" },
-        ],
-        { duration: 520, easing: "cubic-bezier(.3,1.4,.5,1)" }
-      );
-    };
-
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseleave", recenter);
-    scene.addEventListener("click", onClick);
 
     return () => {
       cancelAnimationFrame(raf);
       blinkTimers.forEach(clearTimeout);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseleave", recenter);
-      scene.removeEventListener("click", onClick);
     };
   }, [reduce]);
+
+  // Clear the speech-bubble timer on unmount.
+  React.useEffect(() => () => clearTimeout(bubbleTimer.current), []);
+
+  // ── Click: spin + bounce, a burst of brand sparkles, and a quip bubble ──
+  function spawnSparks() {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const colors = ["#3FE3A3", "#7C5CFF", "#FB7185", "#7CF3C2", "#A855F7"];
+    for (let i = 0; i < 16; i++) {
+      const s = document.createElement("span");
+      s.className = "gl-spark";
+      const c = colors[i % colors.length];
+      s.style.background = c;
+      s.style.boxShadow = `0 0 8px ${c}`;
+      scene.appendChild(s);
+      const ang = (i / 16) * Math.PI * 2 + Math.random() * 0.4;
+      const dist = 70 + Math.random() * 70;
+      const dx = Math.cos(ang) * dist;
+      const dy = Math.sin(ang) * dist - 24;
+      const anim = s.animate(
+        [
+          { transform: "translate(-50%,-50%) translate(0,0) scale(.4)", opacity: 1 },
+          { transform: `translate(-50%,-50%) translate(${dx}px,${dy}px) scale(1)`, opacity: 1, offset: 0.7 },
+          { transform: `translate(-50%,-50%) translate(${dx * 1.2}px,${dy * 1.2 + 28}px) scale(0)`, opacity: 0 },
+        ],
+        { duration: 700 + Math.random() * 300, easing: "cubic-bezier(.2,.6,.3,1)" }
+      );
+      anim.onfinish = () => s.remove();
+    }
+  }
+
+  function celebrate() {
+    setQuip(QUIPS[Math.floor(Math.random() * QUIPS.length)]);
+    clearTimeout(bubbleTimer.current);
+    bubbleTimer.current = setTimeout(() => setQuip(null), 1500);
+    if (reduce) return;
+    celebrateRef.current?.animate(
+      [
+        { transform: "rotateY(0deg) translateY(0) scale(1)" },
+        { transform: "rotateY(180deg) translateY(-44px) scale(1.06)", offset: 0.5 },
+        { transform: "rotateY(360deg) translateY(0) scale(1)" },
+      ],
+      { duration: 760, easing: "cubic-bezier(.34,1.56,.64,1)" }
+    );
+    spawnSparks();
+  }
 
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
-      <div ref={sceneRef} className={`gl-bot-scene ${className}`} aria-label="GuildLabs robot mascot" role="img">
+      <div ref={sceneRef} onClick={celebrate} className={`gl-bot-scene ${className}`} aria-label="GuildLabs robot mascot — click me" role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); celebrate(); } }}>
+        {quip && <div className="gl-bubble">{quip}</div>}
         <div className="gl-shadow" />
-        <div ref={botRef} className="gl-bot">
-          <div className="gl-rig">
-            <div className="gl-antenna">
-              <div className="stalk" />
-              <div className="ball" />
-            </div>
-            <div className="gl-head">
-              <div className="gl-face face-back" />
-              <div className="gl-face face-right" />
-              <div className="gl-face face-left" />
-              <div className="gl-face face-top" />
-              <div className="gl-face face-bottom" />
-              <div className="gl-face face-front" />
-              <div className="gl-screen">
-                <div ref={eyesRef} className="gl-eyes">
-                  <div className="gl-eye" />
-                  <div className="gl-eye" />
+        <div ref={celebrateRef} className="gl-celebrate">
+          <div ref={botRef} className="gl-bot">
+            <div className="gl-rig">
+              <div className="gl-antenna">
+                <div className="stalk" />
+                <div className="ball" />
+              </div>
+              <div className="gl-head">
+                <div className="gl-face face-back" />
+                <div className="gl-face face-right" />
+                <div className="gl-face face-left" />
+                <div className="gl-face face-top" />
+                <div className="gl-face face-bottom" />
+                <div className="gl-face face-front" />
+                <div className="gl-screen">
+                  <div ref={eyesRef} className="gl-eyes">
+                    <div className="gl-eye" />
+                    <div className="gl-eye" />
+                  </div>
+                  <div className="gl-smile" />
                 </div>
-                <div className="gl-smile" />
               </div>
             </div>
           </div>
