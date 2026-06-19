@@ -15,7 +15,7 @@ const PRINCIPLES = [
   },
   {
     title: "Free means free.",
-    body: "No premium tier, no feature gates, no \"upgrade to unlock.\" The hosted versions stay free for as long as one person can afford to run them — and the code stays open so the tools outlive the hosting either way.",
+    body: "No premium tier, no feature gates, no \"upgrade to unlock.\" It's free because you run it yourself — open-source, on your own machine, with no server bills for anyone to pass on to you. The code is yours; nothing can be taken away later.",
   },
   {
     title: "Open and inspectable.",

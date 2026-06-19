@@ -28,6 +28,48 @@ export type GuidePost = {
 
 export const GUIDES: GuidePost[] = [
   {
+    slug: "how-to-self-host-guildlabs-bots",
+    title: "How to self-host the GuildLabs Discord bot",
+    description:
+      "GuildLabs bots are open-source and run on your own machine — no hosting bills, your data stays yours. The full setup: clone the repo, create a Discord app, run it locally, and connect it to the builder.",
+    date: "2026-06-19",
+    author: "GuildLabs",
+    tags: ["Self-host", "Setup", "Open source"],
+    readingMinutes: 6,
+    body: [
+      { type: "p", text: "GuildLabs bots aren't a hosted service you rent — they're open-source programs you run yourself. That's the whole point: no monthly bill, no rate limits, and your community's data never leaves your machine. Every GuildLabs bot runs locally, and this guide gets one going from scratch in about ten minutes." },
+      { type: "callout", text: "You'll need Node.js 20+ and a free Discord account. Everything else is free and open-source." },
+      { type: "h2", id: "clone", text: "Get the code" },
+      { type: "p", text: "Clone the repository and install dependencies. The bot lives in the bot/ folder." },
+      { type: "code", code: "git clone https://github.com/LUCAPOPESCU29/GuildLabs.git\ncd GuildLabs/bot\nnpm install" },
+      { type: "h2", id: "discord-app", text: "Create a Discord application" },
+      { type: "steps", items: [
+        "Open the Discord Developer Portal and click New Application — give it a name. This is your bot.",
+        "Go to Bot, and under Privileged Gateway Intents enable Server Members Intent and Message Content Intent.",
+        "Copy the Bot Token and keep it secret — it's effectively a password.",
+        "Go to OAuth2 → General and copy the Client ID.",
+      ] },
+      { type: "h2", id: "configure", text: "Configure your environment" },
+      { type: "p", text: "Copy the example env file and paste in your token and client ID." },
+      { type: "code", code: "cp .env.example .env\n# then edit .env:\nDISCORD_TOKEN=your_bot_token\nCLIENT_ID=your_client_id" },
+      { type: "h2", id: "run", text: "Register commands and start it" },
+      { type: "code", code: "npm run deploy   # registers the slash commands\nnpm start        # starts the bot (npm run dev = auto-restart)" },
+      { type: "p", text: "When the terminal prints \"online as …\", the bot is live in Discord — for as long as that terminal stays running. Close it and the bot goes offline. That's exactly what self-hosted means: it runs on your machine, under your control." },
+      { type: "h2", id: "invite", text: "Invite it to your server" },
+      { type: "p", text: "Generate an invite URL with Administrator permission (it needs that to create roles and channels), replacing CLIENT_ID with yours:" },
+      { type: "code", code: "https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=8&scope=bot+applications.commands" },
+      { type: "h2", id: "connect", text: "Build a server with it" },
+      { type: "p", text: "Design a server on the GuildLabs builder, then bring it into Discord one of two ways. The simplest needs no public URL: click Deploy to Discord, copy the code, and run /deploy with it in your server — your local bot fetches the blueprint and builds everything. (Power users can instead point the site's BOT_API_URL at the bot's local API on port 3008.)" },
+      { type: "callout", text: "Privacy is the real reason to self-host. Maven's question-matching runs on a local model, so nothing your community says is ever sent to a third party — and there's no per-message API bill, which is why it's free." },
+    ],
+    relatedLinks: [
+      { label: "Construct — the server builder", href: "/bots/construct" },
+      { label: "Maven — local Q&A", href: "/bots/maven" },
+      { label: "Docs & command reference", href: "/docs" },
+      { label: "Source on GitHub", href: "https://github.com/LUCAPOPESCU29/GuildLabs" },
+    ],
+  },
+  {
     slug: "how-to-set-up-a-gaming-discord-server",
     title: "How to set up a gaming Discord server",
     description:

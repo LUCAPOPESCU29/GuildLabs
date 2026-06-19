@@ -35,7 +35,8 @@ const RESOURCES: NavGroup = {
     { label: "Guides", href: "/guides", desc: "How-tos & playbooks" },
     { label: "Compare", href: "/vs", desc: "GuildLabs vs alternatives" },
     { label: "Changelog", href: "/changelog", desc: "What's new" },
-    { label: "Status", href: "/status", desc: "Live bot uptime" },
+    { label: "Self-host", href: "/guides/how-to-self-host-guildlabs-bots", desc: "Run the bots yourself" },
+    { label: "Status", href: "/status", desc: "Is the bot reachable?" },
     { label: "Wall of love", href: "/wall", desc: "What people say" },
   ],
 };

@@ -273,14 +273,12 @@ function ServersView({
                 <Button size="sm" variant="outline" onClick={onRefresh}>
                   <RefreshCw className="size-4" /> Retry
                 </Button>
-                <a
-                  href="https://github.com/LUCAPOPESCU29/GuildLabs"
-                  target="_blank"
-                  rel="noreferrer"
+                <Link
+                  href="/guides/how-to-self-host-guildlabs-bots"
                   className="text-sm font-semibold text-primary hover:underline"
                 >
                   Self-hosting guide →
-                </a>
+                </Link>
               </div>
             </div>
           </div>

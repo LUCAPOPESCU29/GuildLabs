@@ -459,21 +459,22 @@ export default function Home() {
               <ShieldCheck className="size-3.5" /> Free forever
             </SectionLabel>
             <h2 className="mt-5 font-display text-5xl font-black leading-[0.95] tracking-tight sm:text-7xl text-balance">
-              Free, open, and <span className="hl-coral">yours.</span>
+              Open-source. <span className="hl-coral">You run it.</span>
             </h2>
             <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
-              No premium tier. No locked features behind a MEE6-style subscription. The
-              source is on GitHub — read exactly what every bot does before you add it.
-              Maven even runs locally, so your community&apos;s questions never leave your
-              server.
+              GuildLabs bots aren&apos;t a hosted service you rent — they&apos;re open-source
+              programs you run on your own machine. No premium tier, no subscription, no
+              servers to pay for: just clone it, start it, and your community&apos;s data
+              never leaves your hardware. The source is on GitHub — read exactly what every
+              bot does, then host it yourself in about ten minutes.
             </p>
             <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm font-semibold text-primary">
+              <Link href="/guides/how-to-self-host-guildlabs-bots" className="inline-flex items-center gap-1 hover:opacity-80">
+                Self-host guide <ArrowRight className="size-3.5" />
+              </Link>
               <a href="https://github.com/LUCAPOPESCU29/GuildLabs" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:opacity-80">
                 Read the source <ArrowRight className="size-3.5" />
               </a>
-              <Link href="/templates" className="inline-flex items-center gap-1 hover:opacity-80">
-                Browse templates <ArrowRight className="size-3.5" />
-              </Link>
               <Link href="/vs" className="inline-flex items-center gap-1 hover:opacity-80">
                 Compare with MEE6 &amp; more <ArrowRight className="size-3.5" />
               </Link>

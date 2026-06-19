@@ -549,8 +549,8 @@ const MANIFEST: { n: string; title: string; body: string }[] = [
   },
   {
     n: "II",
-    title: "Free until it can't be.",
-    body: "Maintenance scales with users, not feature count. Hosted versions stay free as long as we can afford to keep them so.",
+    title: "Free, because you run it.",
+    body: "There's no server for us to pay for — you self-host the bots on your own machine. Open-source and MIT-licensed, so they stay free for good.",
   },
   {
     n: "III",

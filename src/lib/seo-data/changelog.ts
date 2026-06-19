@@ -48,7 +48,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     summary:
       "Deploying used to need the site to reach your bot directly, which never worked once the bot lived anywhere but your own machine. Now it's inverted: the site gives you a short one-time code, you run /deploy with it in your server, and the bot pulls the blueprint and builds everything. We also fixed the roles it creates — they now get real Discord permissions instead of a best-guess.",
     items: [
-      { type: "added", text: "Claim-code deploy — generate a code on the site, run /deploy in your server, done. Works no matter where the bot is hosted" },
+      { type: "added", text: "Claim-code deploy — generate a code on the site, run /deploy in your server, done. Works wherever you run the bot, including on your own machine" },
       { type: "fixed", text: "Deployed roles now carry explicit Discord permissions per preset — no more roles created with the wrong access or none at all" },
     ],
   },

@@ -68,7 +68,7 @@ const FAQS = [
   { q: "Can I edit what the AI generates?", a: "Always. You review the full blueprint and can drag to reorder, rename, change channel types, and adjust roles before you deploy." },
   { q: "What does the AI do with my description?", a: "Construct sends it to our AI provider (Groq) to generate the blueprint, then shows it to you to review. See the Privacy Policy for details." },
   { q: "What permissions does the bot need?", a: "Administrator — it has to create roles and channels and set their permissions. You invite it to the one server you choose." },
-  { q: "Do I have to host anything?", a: "No for the web builder and ChartIt. Maven is self-hosted so your community’s data stays on your own machine." },
+  { q: "Do I have to host anything?", a: "The web builder runs here, but the bots are open-source and self-hosted — you run them on your own machine. It's free, takes about ten minutes, and keeps your data yours. See the self-host guide." },
 ] as const;
 
 function CopyButton({ text }: { text: string }) {
