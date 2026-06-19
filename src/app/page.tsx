@@ -21,6 +21,11 @@ import {
 } from "lucide-react";
 import { BackgroundPaths } from "@/components/fx/background-paths";
 import { GuildBot3D } from "@/components/fx/guild-bot-3d";
+import { GooeyText } from "@/components/ui/gooey-text-morphing";
+
+// Brand statements that morph in the hero (stable identity so the animation
+// doesn't restart on every render).
+const HERO_WORDS = ["Open-source.", "Self-hosted.", "AI-powered.", "Yours forever."];
 import { GuildLabsLogo } from "@/components/logo";
 import { SiteNav } from "@/components/site/site-nav";
 import { Button } from "@/components/ui/button";
@@ -118,24 +123,28 @@ export default function Home() {
               <Sparkles className="size-4" /> New — AI server blueprints
             </motion.span>
 
-            <motion.h1
-              variants={fadeUp}
-              className="font-display text-5xl font-black leading-[0.95] tracking-tight sm:text-7xl"
-            >
-              A finished Discord
-              <br />
-              server in minutes.
-              <br />
-              <span className="text-accent">Free.</span>
-            </motion.h1>
+            {/* Static heading for SEO + screen readers; the morphing words are
+                the visual focal. */}
+            <h1 className="sr-only">
+              GuildLabs — open-source, self-hosted Discord bots you run yourself. Build a finished
+              server in minutes, free.
+            </h1>
+            <motion.div variants={fadeUp} aria-hidden className="mt-1 h-[88px] sm:h-[132px]">
+              <GooeyText
+                texts={HERO_WORDS}
+                align="left"
+                className="h-full"
+                textClassName="font-display font-black tracking-tight text-white"
+              />
+            </motion.div>
 
             <motion.p
               variants={fadeUp}
-              className="mt-6 max-w-lg text-lg text-white/75"
+              className="mt-5 max-w-lg text-lg text-white/75"
             >
-              Pick what your community needs. The AI turns your choices into channels,
-              roles, and permissions, then deploys them to your server. No config to
-              learn. No subscription.
+              A studio of Discord bots that build, chart, and run your community — designed by AI,
+              owned by you. Describe a server and deploy it in minutes, or download a bot and host
+              it yourself. No subscription, ever.
             </motion.p>
 
             <motion.div

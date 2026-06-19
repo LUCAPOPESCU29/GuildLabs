@@ -17,7 +17,11 @@ import {
   CandlestickChart,
 } from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
+import { GooeyText } from "@/components/ui/gooey-text-morphing";
 import { BOT_CATEGORIES } from "@/lib/seo-data/bot-categories";
+
+// What the bots do — morphs in the catalog hero (stable identity).
+const BOTS_DO = ["Build servers.", "Chart markets.", "Answer questions.", "Run it yourself."];
 
 // ──────────────────────────────────────────────────────────────────────────────
 // CATALOG DATA — every bot, live or planned
@@ -380,6 +384,18 @@ function CatalogHero({ counts }: { counts: Record<Filter, number> }) {
           <p className="mt-3 text-lg text-muted-foreground">
             A small studio making <em className="not-italic">distinct</em> tools for Discord communities.
           </p>
+
+          {/* Morphing one-liner of what the bots actually do */}
+          <div aria-hidden className="mt-6 h-[64px] sm:h-[88px]">
+            <GooeyText
+              texts={BOTS_DO}
+              align="left"
+              morphTime={0.9}
+              cooldownTime={0.7}
+              className="h-full"
+              textClassName="font-display font-black tracking-tight text-primary !text-4xl md:!text-6xl"
+            />
+          </div>
 
           <p className="mt-7 max-w-xl text-base text-muted-foreground sm:text-lg">
             Each bot is built to do one thing exceptionally — not twenty things adequately. Three
