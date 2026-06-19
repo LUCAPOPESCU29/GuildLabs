@@ -22,6 +22,7 @@ import { SpotlightCard } from "@/components/fx/spotlight-card";
 import { Reveal } from "@/components/site/reveal";
 import { SectionLabel } from "@/components/site/section-label";
 import { AskDemo } from "@/components/demos/ask-demo";
+import { MavenFeature } from "@/components/sections/bot-features";
 import { EASE_EXPO } from "@/lib/motion";
 
 // Maven's accent is the brand mint — token-driven so it adapts to light/dark.
@@ -266,6 +267,9 @@ export default function MavenClient() {
           </ProductWindow>
         </Reveal>
       </section>
+
+      {/* ── What it does ──────────────────────────────────────────────────── */}
+      <MavenFeature />
 
       {/* ── Final CTA ─────────────────────────────────────────────────────── */}
       <section className="px-6 pb-32 text-center">

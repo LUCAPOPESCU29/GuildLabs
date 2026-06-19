@@ -21,6 +21,7 @@ import { TiltCard } from "@/components/fx/tilt-card";
 import { SpotlightCard } from "@/components/fx/spotlight-card";
 import { Reveal } from "@/components/site/reveal";
 import { ChartDemo } from "@/components/demos/chart-demo";
+import { ChartItFeature } from "@/components/sections/bot-features";
 import { EASE_EXPO } from "@/lib/motion";
 
 // ChartIt's page accent is the brand coral — token-driven so it adapts to
@@ -247,6 +248,9 @@ export default function ChartItClient() {
           </ProductWindow>
         </Reveal>
       </section>
+
+      {/* ── What it does ──────────────────────────────────────────────────── */}
+      <ChartItFeature />
 
       {/* ── Final CTA ─────────────────────────────────────────────────────── */}
       <section className="px-6 pb-32 text-center">

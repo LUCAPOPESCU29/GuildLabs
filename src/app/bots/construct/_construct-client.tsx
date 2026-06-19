@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { GuildLabsLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
+import { ConstructFeature } from "@/components/sections/bot-features";
 import { DiscordIcon } from "@/components/icons/discord";
 import { GithubIcon } from "@/components/icons/github";
 import { TiltCard } from "@/components/fx/tilt-card";
@@ -226,6 +227,9 @@ export default function ConstructClient() {
           </ProductWindow>
         </Reveal>
       </section>
+
+      {/* ── What it does ──────────────────────────────────────────────────── */}
+      <ConstructFeature />
 
       {/* ── Final CTA ─────────────────────────────────────────────────────── */}
       <section className="px-6 pb-32 text-center">
