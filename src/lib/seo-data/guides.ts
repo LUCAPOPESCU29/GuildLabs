@@ -39,9 +39,9 @@ export const GUIDES: GuidePost[] = [
     body: [
       { type: "p", text: "GuildLabs bots aren't a hosted service you rent — they're open-source programs you run yourself. That's the whole point: no monthly bill, no rate limits, and your community's data never leaves your machine. Every GuildLabs bot runs locally, and this guide gets one going from scratch in about ten minutes." },
       { type: "callout", text: "You'll need Node.js 20+ and a free Discord account. Everything else is free and open-source." },
-      { type: "h2", id: "clone", text: "Get the code" },
-      { type: "p", text: "Clone the repository and install dependencies. The bot lives in the bot/ folder." },
-      { type: "code", code: "git clone https://github.com/LUCAPOPESCU29/GuildLabs.git\ncd GuildLabs/bot\nnpm install" },
+      { type: "h2", id: "download", text: "Download the bot" },
+      { type: "p", text: "Download the bot bundle from the self-host page (it's a ~50 KB zip, no GitHub account needed), unzip it, and install dependencies in a terminal opened in that folder." },
+      { type: "code", code: "# after unzipping guildlabs-bot.zip\ncd guildlabs-bot\nnpm install" },
       { type: "h2", id: "discord-app", text: "Create a Discord application" },
       { type: "steps", items: [
         "Open the Discord Developer Portal and click New Application — give it a name. This is your bot.",
@@ -63,10 +63,10 @@ export const GUIDES: GuidePost[] = [
       { type: "callout", text: "Privacy is the real reason to self-host. Maven's question-matching runs on a local model, so nothing your community says is ever sent to a third party — and there's no per-message API bill, which is why it's free." },
     ],
     relatedLinks: [
+      { label: "Self-host — download the bot", href: "/self-host" },
       { label: "Construct — the server builder", href: "/bots/construct" },
       { label: "Maven — local Q&A", href: "/bots/maven" },
       { label: "Docs & command reference", href: "/docs" },
-      { label: "Source on GitHub", href: "https://github.com/LUCAPOPESCU29/GuildLabs" },
     ],
   },
   {

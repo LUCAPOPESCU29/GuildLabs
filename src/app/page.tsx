@@ -469,8 +469,8 @@ export default function Home() {
               bot does, then host it yourself in about ten minutes.
             </p>
             <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm font-semibold text-primary">
-              <Link href="/guides/how-to-self-host-guildlabs-bots" className="inline-flex items-center gap-1 hover:opacity-80">
-                Self-host guide <ArrowRight className="size-3.5" />
+              <Link href="/self-host" className="inline-flex items-center gap-1 hover:opacity-80">
+                Self-host it <ArrowRight className="size-3.5" />
               </Link>
               <a href="https://github.com/LUCAPOPESCU29/GuildLabs" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:opacity-80">
                 Read the source <ArrowRight className="size-3.5" />
