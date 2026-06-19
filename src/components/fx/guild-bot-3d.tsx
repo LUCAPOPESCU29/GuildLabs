@@ -66,8 +66,10 @@ export function GuildBot3D({ className = "" }: { className?: string }) {
     const eyes = eyesRef.current;
     if (!scene || !bot || !eyes) return;
 
-    if (reduce) {
-      // Gentle static three-quarter pose.
+    // Skip the per-frame rAF + pointer tracking when there's no fine pointer
+    // (touch devices) or motion is reduced — it would otherwise run forever on
+    // phones for no benefit. The bot still floats via its CSS animation.
+    if (reduce || !window.matchMedia("(pointer: fine)").matches) {
       bot.style.transform = "rotateY(14deg) rotateX(-6deg)";
       return;
     }

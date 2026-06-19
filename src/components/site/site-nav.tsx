@@ -49,7 +49,17 @@ export function SiteNav({ floating = false }: { floating?: boolean }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
   React.useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
+    // rAF-batch so we update state at most once per frame, not once per scroll
+    // event (which fires far more often and chops scrolling on phones).
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        setScrolled(window.scrollY > 8);
+        ticking = false;
+      });
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);

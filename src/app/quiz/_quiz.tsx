@@ -15,6 +15,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { ArrowLeft, ArrowRight, Hash, RotateCcw, Shield, Sparkles, Users, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GuildLabsLogo } from "@/components/logo";
@@ -111,6 +112,7 @@ function Aurora({ accent, reduce }: { accent: string; reduce: boolean | null }) 
 
 export function Quiz() {
   const reduce = useReducedMotion();
+  const phone = useMediaQuery("(max-width: 768px)");
   const [step, setStep] = React.useState(0);
   const [picks, setPicks] = React.useState<number[]>([]);
   const [dir, setDir] = React.useState(1);
@@ -190,7 +192,7 @@ export function Quiz() {
 
   return (
     <div className="grain relative min-h-dvh" style={{ ["--q-accent" as string]: accent }}>
-      <Aurora accent={accent} reduce={reduce} />
+      <Aurora accent={accent} reduce={reduce || phone} />
       <Confetti fire={done} />
 
       {/* Minimal top bar — home + skip escape (immersive-pattern best practice) */}

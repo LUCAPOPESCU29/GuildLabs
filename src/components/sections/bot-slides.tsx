@@ -6,6 +6,7 @@ import { motion, useInView, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { EASE_EXPO } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/lib/use-media-query";
 
 export type BotSlide = {
   name: string;
@@ -28,6 +29,7 @@ const SWIPE_VELOCITY = 400;
  */
 export function BotSlides({ bots }: { bots: BotSlide[] }) {
   const reduce = useReducedMotion();
+  const phone = useMediaQuery("(max-width: 768px)");
   const [index, setIndex] = React.useState(0);
   const [stageW, setStageW] = React.useState(0);
   const stageRef = React.useRef<HTMLDivElement>(null);
@@ -52,15 +54,17 @@ export function BotSlides({ bots }: { bots: BotSlide[] }) {
     return () => ro.disconnect();
   }, []);
 
-  // Gentle autoplay: only while visible, unhovered, and untouched.
+  // Gentle autoplay: only while visible, unhovered, and untouched. Off on
+  // phones — periodically re-running the 3D card transforms causes jank, and
+  // swiping is the natural mobile gesture anyway.
   React.useEffect(() => {
-    if (reduce || !inView) return;
+    if (reduce || !inView || phone) return;
     const id = setInterval(() => {
       if (interactedRef.current || hoverRef.current || document.hidden) return;
       setIndex((i) => (i + 1) % n);
     }, 5000);
     return () => clearInterval(id);
-  }, [n, reduce, inView]);
+  }, [n, reduce, inView, phone]);
 
   if (reduce) {
     return (

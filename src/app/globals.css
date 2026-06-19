@@ -193,13 +193,14 @@
     border: 1px solid color-mix(in oklab, var(--card-border) 80%, transparent);
   }
   /* A blurred, saturated fixed bar is expensive to recomposite on every scroll
-     frame on phones. Use a cheaper blur + a more opaque background (so it still
-     reads) on small screens. */
+     frame on phones — it's the biggest cause of scroll jank. Drop the
+     backdrop-filter entirely on small screens and use an opaque solid bar
+     instead (still reads fine, costs nothing to scroll). */
   @media (max-width: 768px) {
     .nav-blur {
-      background: color-mix(in oklab, var(--card) 88%, transparent);
-      -webkit-backdrop-filter: blur(8px);
-      backdrop-filter: blur(8px);
+      background: color-mix(in oklab, var(--card) 96%, transparent);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
     }
   }
 
@@ -240,6 +241,13 @@
     opacity: 0.035;
     mix-blend-mode: overlay;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  /* The grain overlay (blend-mode + isolation) forces an extra composited layer
+     and repaints per surface — skip it on phones where it's barely visible. */
+  @media (max-width: 768px) {
+    .grain::after {
+      display: none;
+    }
   }
 
   /* bold highlight markers for expressive headlines (token-driven) */

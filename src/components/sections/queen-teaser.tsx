@@ -16,6 +16,7 @@
 
 import * as React from "react";
 import { motion, useReducedMotion } from "framer-motion";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { Crown, Sparkles, Lock, MessageSquare, ScrollText, Loader2, Check, ArrowRight } from "lucide-react";
 import { Reveal } from "@/components/site/reveal";
 
@@ -29,7 +30,11 @@ const CHIPS = [
 ];
 
 export function QueenTeaser() {
-  const reduce = useReducedMotion();
+  const reduceRaw = useReducedMotion();
+  // Treat phones like reduced-motion for the heavy animated-blur backdrop +
+  // shimmer (they're the expensive bits; the form interactions stay lively).
+  const phone = useMediaQuery("(max-width: 768px)");
+  const reduce = reduceRaw || phone;
   const [email, setEmail] = React.useState("");
   const [status, setStatus] = React.useState<Status>("idle");
   const [error, setError] = React.useState<string | null>(null);
