@@ -96,9 +96,10 @@ export default function Home() {
           className="grain absolute inset-0"
           style={{ background: "linear-gradient(160deg, #241a4d 0%, #1a1238 52%, #0f0a22 100%)" }}
         />
-        {/* soft glows */}
-        <div aria-hidden className="pointer-events-none absolute -right-10 top-6 size-[28rem] rounded-full opacity-25 blur-3xl" style={{ background: "var(--secondary)" }} />
-        <div aria-hidden className="pointer-events-none absolute -bottom-24 -left-16 size-96 rounded-full opacity-20 blur-3xl" style={{ background: "var(--accent)" }} />
+        {/* soft glows — hidden on phones, where the large blur washes out the
+            small viewport (and is costly to render) */}
+        <div aria-hidden className="pointer-events-none absolute -right-10 top-6 hidden size-[28rem] rounded-full opacity-25 blur-3xl sm:block" style={{ background: "var(--secondary)" }} />
+        <div aria-hidden className="pointer-events-none absolute -bottom-24 -left-16 hidden size-96 rounded-full opacity-20 blur-3xl sm:block" style={{ background: "var(--accent)" }} />
         {/* a few stars for the night feel */}
         <span className="absolute left-[10%] top-[24%] size-1 rounded-full bg-white/70 animate-twinkle" />
         <span className="absolute left-[40%] top-[18%] size-1.5 rounded-full bg-white/60 animate-twinkle [animation-delay:1.1s]" />

@@ -19,8 +19,8 @@ import { useReducedMotion } from "framer-motion";
 
 const CSS = `
 .gl-bot-scene{ width:100%; height:100%; perspective:1100px; perspective-origin:50% 42%; cursor:pointer; user-select:none; }
-.gl-bot{ position:relative; width:100%; height:100%; transform-style:preserve-3d; transform:rotateX(0) rotateY(0); transition:transform .25s cubic-bezier(.22,.61,.36,1); animation:gl-float 5.5s ease-in-out infinite; }
-@keyframes gl-float{ 0%,100%{margin-top:0} 50%{margin-top:-16px} }
+.gl-bot{ position:relative; width:100%; height:100%; transform-style:preserve-3d; transform:rotateX(0) rotateY(0); transition:transform .25s cubic-bezier(.22,.61,.36,1); }
+@keyframes gl-float{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-16px)} }
 .gl-rig{ position:absolute; inset:0; transform-style:preserve-3d; }
 .gl-antenna{ position:absolute; left:50%; top:34px; width:12px; height:62px; transform:translateX(-50%) translateZ(8px); transform-style:preserve-3d; }
 .gl-antenna .stalk{ position:absolute; left:50%; top:18px; width:10px; height:46px; border-radius:6px; transform:translateX(-50%); background:linear-gradient(90deg,#D2CDE8,#fff 45%,#EAE7F6); }
@@ -41,12 +41,12 @@ const CSS = `
 .gl-smile{ position:absolute; left:50%; top:78px; width:64px; height:30px; transform:translateX(-50%); border:6px solid #3FE3A3; border-top:none; border-radius:0 0 60px 60px; box-shadow:0 0 10px rgba(63,227,163,.5); }
 .gl-shadow{ position:absolute; left:50%; bottom:34px; width:200px; height:34px; margin-left:-100px; background:radial-gradient(50% 50% at 50% 50%, rgba(40,18,90,.45), rgba(40,18,90,0) 70%); border-radius:50%; animation:gl-shadow 5.5s ease-in-out infinite; }
 @keyframes gl-shadow{ 0%,100%{transform:scale(1);opacity:.55} 50%{transform:scale(.82);opacity:.35} }
-.gl-celebrate{ position:absolute; inset:0; transform-style:preserve-3d; }
+.gl-celebrate{ position:absolute; inset:0; transform-style:preserve-3d; animation:gl-float 5.5s ease-in-out infinite; }
 .gl-spark{ position:absolute; left:50%; top:42%; width:11px; height:11px; border-radius:50%; pointer-events:none; z-index:20; }
 .gl-bubble{ position:absolute; left:50%; top:2px; z-index:30; transform:translateX(-50%); padding:7px 13px; border-radius:15px; background:#fff; color:#2A1B4A; font-weight:800; font-size:13px; line-height:1; white-space:nowrap; box-shadow:0 10px 26px rgba(40,18,90,.4); animation:gl-pop .26s cubic-bezier(.34,1.56,.64,1); }
 .gl-bubble::after{ content:""; position:absolute; left:50%; bottom:-6px; width:14px; height:14px; background:#fff; transform:translateX(-50%) rotate(45deg); border-radius:3px; }
 @keyframes gl-pop{ from{transform:translateX(-50%) scale(.5); opacity:0} to{transform:translateX(-50%) scale(1); opacity:1} }
-@media (prefers-reduced-motion:reduce){ .gl-bot{animation:none} .gl-shadow{animation:none} }
+@media (prefers-reduced-motion:reduce){ .gl-celebrate{animation:none} .gl-shadow{animation:none} }
 `;
 
 const QUIPS = ["Let's build! 🚀", "👑", "Beep boop ✨", "Hi there!", "To the server!", "gm ☀️", "Nice click 😄", "Free forever 💜"];
@@ -68,11 +68,9 @@ export function GuildBot3D({ className = "" }: { className?: string }) {
 
     // Skip the per-frame rAF + pointer tracking when there's no fine pointer
     // (touch devices) or motion is reduced — it would otherwise run forever on
-    // phones for no benefit. The bot still floats via its CSS animation.
-    if (reduce || !window.matchMedia("(pointer: fine)").matches) {
-      bot.style.transform = "rotateY(14deg) rotateX(-6deg)";
-      return;
-    }
+    // phones for no benefit. The bot stays facing forward and gently floats via
+    // its CSS animation; no weird static lean, no per-frame work.
+    if (reduce || !window.matchMedia("(pointer: fine)").matches) return;
 
     let tx = 0, ty = 0, cx = 0, cy = 0;
     let raf = 0;
