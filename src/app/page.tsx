@@ -464,19 +464,18 @@ export default function Home() {
             <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
               GuildLabs bots aren&apos;t a hosted service you rent — they&apos;re open-source
               programs you run on your own machine. No premium tier, no subscription, no
-              servers to pay for: just clone it, start it, and your community&apos;s data
-              never leaves your hardware. The source is on GitHub — read exactly what every
-              bot does, then host it yourself in about ten minutes.
+              servers to pay for. Download the bot right from this site, start it, and your
+              community&apos;s data never leaves your hardware — you&apos;re live in about ten
+              minutes.
             </p>
-            <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm font-semibold text-primary">
-              <Link href="/self-host" className="inline-flex items-center gap-1 hover:opacity-80">
-                Self-host it <ArrowRight className="size-3.5" />
+            <div className="mt-7 flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+              <Link href="/self-host">
+                <Button size="lg" variant="primary" magnetic>
+                  <Download className="size-5" /> Download &amp; self-host — free
+                </Button>
               </Link>
-              <a href="https://github.com/LUCAPOPESCU29/GuildLabs" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:opacity-80">
-                Read the source <ArrowRight className="size-3.5" />
-              </a>
-              <Link href="/vs" className="inline-flex items-center gap-1 hover:opacity-80">
-                Compare with MEE6 &amp; more <ArrowRight className="size-3.5" />
+              <Link href="/guides/how-to-self-host-guildlabs-bots" className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:opacity-80">
+                Read the 10-minute guide <ArrowRight className="size-3.5" />
               </Link>
             </div>
           </div>
@@ -585,6 +584,7 @@ export default function Home() {
                 <Link href="/#how" className="hover:text-foreground transition-colors">How it works</Link>
                 <Link href="/bots" className="hover:text-foreground transition-colors">Bots</Link>
                 <Link href="/templates" className="hover:text-foreground transition-colors">Templates</Link>
+                <Link href="/self-host" className="hover:text-foreground transition-colors">Self-host</Link>
                 <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
               </div>
               <div className="flex flex-col gap-2">
