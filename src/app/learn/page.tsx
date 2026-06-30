@@ -4,7 +4,7 @@ import { breadcrumbLd, itemListLd } from "@/lib/seo-data/jsonld";
 import { JsonLd } from "@/components/json-ld";
 import { SiteHeader } from "@/components/site/site-header";
 import { SiteFooter } from "@/components/site/site-footer";
-import { LESSONS } from "@/lib/learn-data";
+import { COURSES } from "@/lib/learn/curriculum";
 import { Learn } from "./_learn";
 
 export const metadata: Metadata = buildMetadata({
@@ -23,7 +23,7 @@ export default function LearnPage() {
             { name: "Home", path: "/" },
             { name: "Learn", path: "/learn" },
           ]),
-          itemListLd(LESSONS.map((l) => ({ name: l.title, path: `/learn#${l.id}` }))),
+          itemListLd(COURSES.map((c) => ({ name: c.name, path: `/learn/course/${c.slug}` }))),
         ]}
       />
       <SiteHeader />
