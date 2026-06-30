@@ -3,20 +3,26 @@
 import * as React from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowRight, Download, MessageSquare, LayoutTemplate, Bell, Sparkles, Lightbulb } from "lucide-react";
+import { ArrowRight, Download, BookOpen, Wrench, HelpCircle, FlaskConical, Sparkles, Lightbulb, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Reveal } from "@/components/site/reveal";
 import { CodeBlock } from "@/components/ui/code-block";
 import { GooeyText } from "@/components/ui/gooey-text-morphing";
 import { BackgroundPaths } from "@/components/fx/background-paths";
+import { Quiz } from "@/components/learn/quiz";
+import { Lab } from "@/components/learn/lab";
+import { useLearnProgress } from "@/lib/learn/progress";
 import { LESSONS, type LearnBlock } from "@/lib/learn-data";
+import { BASICS_QUIZ } from "@/lib/learn/quizzes";
+import { LABS } from "@/lib/learn/labs";
 
 const HERO_WORDS = ["From zero.", "In 15 minutes.", "No experience.", "All open-source."];
 
-const BUILD = [
-  { icon: MessageSquare, title: "A bot that responds", body: "Slash commands your members can run — the core loop every bot is built on." },
-  { icon: LayoutTemplate, title: "Rich embeds", body: "Polished messages with titles, colors, and fields instead of plain text." },
-  { icon: Bell, title: "Automatic events", body: "React to things happening — welcome new members, watch messages, and more." },
+const TRACKS = [
+  { icon: BookOpen, title: "Course", body: "Six short lessons from nothing to a running bot.", href: "#lessons", key: "course" },
+  { icon: Wrench, title: "Build a bot", body: "Choose what your bot does — live code + terminal.", href: "/learn/build", key: "workshop:simple" },
+  { icon: HelpCircle, title: "Quiz", body: "Check what stuck with a 5-question quiz.", href: "#quiz", key: "quiz:basics" },
+  { icon: FlaskConical, title: "Labs", body: "Three open-ended challenges to try yourself.", href: "#labs", key: "labs" },
 ];
 
 function fadeUp(delay = 0) {
@@ -58,6 +64,8 @@ function Block({ block }: { block: LearnBlock }) {
 }
 
 export function Learn() {
+  const { done, mark } = useLearnProgress();
+  const labsDone = LABS.filter((l) => done[`lab:${l.id}`]).length;
   return (
     <main className="relative">
       {/* ── Hero ──────────────────────────────────────────────────────────── */}
@@ -98,23 +106,34 @@ export function Learn() {
         </div>
       </section>
 
-      {/* ── What you'll build ─────────────────────────────────────────────── */}
+      {/* ── Tracks ────────────────────────────────────────────────────────── */}
       <section className="px-5 py-20">
         <div className="mx-auto max-w-5xl">
           <Reveal>
-            <h2 className="font-display text-3xl font-black tracking-tight sm:text-4xl">What you&apos;ll build</h2>
-            <p className="mt-3 max-w-lg text-muted-foreground">Five short lessons. By the end you&apos;ll have a bot that does all three of these.</p>
+            <h2 className="font-display text-3xl font-black tracking-tight sm:text-4xl">Four ways to learn</h2>
+            <p className="mt-3 max-w-lg text-muted-foreground">Read the course, build a bot you design, test yourself, then tackle the labs.</p>
           </Reveal>
-          <div className="mt-8 grid gap-4 sm:grid-cols-3">
-            {BUILD.map((b, i) => (
-              <motion.div key={b.title} {...fadeUp(i * 0.08)} className="glass rounded-3xl p-6">
-                <span className="grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary">
-                  <b.icon className="size-5" />
-                </span>
-                <h3 className="mt-4 font-display text-lg font-black">{b.title}</h3>
-                <p className="mt-1.5 text-sm text-muted-foreground">{b.body}</p>
-              </motion.div>
-            ))}
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {TRACKS.map((t, i) => {
+              const complete = t.key === "labs" ? labsDone === LABS.length : done[t.key];
+              return (
+                <motion.div key={t.title} {...fadeUp(i * 0.06)}>
+                  <Link href={t.href} className="glass group flex h-full flex-col rounded-3xl p-6 transition-all hover:-translate-y-1 hover:bg-primary/5">
+                    <div className="flex items-center justify-between">
+                      <span className="grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary">
+                        <t.icon className="size-5" />
+                      </span>
+                      {complete && <Check className="size-5 text-success" />}
+                    </div>
+                    <h3 className="mt-4 font-display text-lg font-black">{t.title}</h3>
+                    <p className="mt-1.5 flex-1 text-sm text-muted-foreground">{t.body}</p>
+                    <span className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-primary">
+                      Open <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+                    </span>
+                  </Link>
+                </motion.div>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -145,6 +164,36 @@ export function Learn() {
                   ))}
                 </div>
               </motion.article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Quiz ──────────────────────────────────────────────────────────── */}
+      <section id="quiz" className="scroll-mt-24 px-5 pb-24">
+        <div className="mx-auto max-w-3xl">
+          <Reveal>
+            <span className="text-xs font-bold uppercase tracking-widest text-primary">Quiz</span>
+            <h2 className="mt-2 font-display text-3xl font-black tracking-tight sm:text-4xl">Did it stick?</h2>
+            <p className="mt-3 text-muted-foreground">Five quick questions. Pick an answer to see if you&apos;re right and why.</p>
+          </Reveal>
+          <div className="mt-8">
+            <Quiz questions={BASICS_QUIZ} onComplete={() => mark("quiz:basics")} />
+          </div>
+        </div>
+      </section>
+
+      {/* ── Labs ──────────────────────────────────────────────────────────── */}
+      <section id="labs" className="scroll-mt-24 px-5 pb-24">
+        <div className="mx-auto max-w-3xl">
+          <Reveal>
+            <span className="text-xs font-bold uppercase tracking-widest text-primary">Labs</span>
+            <h2 className="mt-2 font-display text-3xl font-black tracking-tight sm:text-4xl">Now try it yourself</h2>
+            <p className="mt-3 text-muted-foreground">Open-ended challenges — work through the checkpoints, peek at a hint if you&apos;re stuck, then check your answer.</p>
+          </Reveal>
+          <div className="mt-8 space-y-5">
+            {LABS.map((lab) => (
+              <Lab key={lab.id} lab={lab} onComplete={() => mark(`lab:${lab.id}`)} />
             ))}
           </div>
         </div>
