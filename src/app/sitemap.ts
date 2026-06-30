@@ -30,6 +30,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/vs`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${base}/docs`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${base}/guides`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
+    { url: `${base}/learn`, lastModified: now, changeFrequency: "monthly", priority: 0.8 },
     { url: `${base}/stocks`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${base}/changelog`, lastModified: now, changeFrequency: "weekly", priority: 0.6 },
     { url: `${base}/status`, lastModified: now, changeFrequency: "daily", priority: 0.4 },

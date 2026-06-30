@@ -29,6 +29,7 @@ const PRODUCTS: NavGroup = {
 const RESOURCES: NavGroup = {
   label: "Resources",
   items: [
+    { label: "Learn", href: "/learn", desc: "Build a Discord bot from zero" },
     { label: "Playground", href: "/playground", desc: "Chat with the bot — try / commands" },
     { label: "Free tools", href: "/tools", desc: "Embed builder & more" },
     { label: "Docs", href: "/docs", desc: "Command references" },
