@@ -52,6 +52,9 @@ next-env.d.ts
 # bot runtime data
 chartit/data/
 maven/data/
+bot/data/
+forget-bot/data/
+beacon/data/
 
 # nested dependencies (safety)
 **/node_modules/

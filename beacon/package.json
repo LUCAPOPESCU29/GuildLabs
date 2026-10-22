@@ -1,0 +1,25 @@
+{
+  "name": "beacon-discord-bot",
+  "version": "0.1.0",
+  "description": "Beacon — a live public page and an activity-ranked directory for any Discord server. Open source, self-hostable.",
+  "main": "src/index.js",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning src/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.8"
+  }
+}

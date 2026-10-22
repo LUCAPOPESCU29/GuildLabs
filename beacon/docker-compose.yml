@@ -1,0 +1,20 @@
+# Self-host Beacon with one command:
+#   cp .env.example .env   # fill in DISCORD_TOKEN + CLIENT_ID + BEACON_PUBLIC_URL
+#   docker compose up -d
+services:
+  beacon:
+    build: .
+    image: beacon-discord-bot:latest
+    container_name: beacon
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    volumes:
+      - beacon-data:/data
+
+volumes:
+  beacon-data:

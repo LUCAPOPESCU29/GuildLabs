@@ -81,6 +81,18 @@ const BOTS: BotEntry[] = [
   },
   {
     no: "04",
+    slug: "beacon",
+    name: "Beacon",
+    tagline: "Get found.",
+    description:
+      "A live public page and a directory spot for any Discord server — ranked by real activity, never bumps. Discord's Discovery needs ~1,000 members; Beacon is for everyone below that line.",
+    status: "beta",
+    category: "Community",
+    href: "/bots/beacon",
+    Visual: BeaconVisual,
+  },
+  {
+    no: "05",
     slug: "salon",
     name: "Salon",
     tagline: "Meet someone.",
@@ -91,7 +103,7 @@ const BOTS: BotEntry[] = [
     Visual: SalonVisual,
   },
   {
-    no: "05",
+    no: "06",
     slug: "aurora",
     name: "Aurora",
     tagline: "Set the mood.",
@@ -102,7 +114,7 @@ const BOTS: BotEntry[] = [
     Visual: AuroraVisual,
   },
   {
-    no: "06",
+    no: "07",
     slug: "pulse",
     name: "Pulse",
     tagline: "Know your community.",
@@ -113,7 +125,7 @@ const BOTS: BotEntry[] = [
     Visual: PulseVisual,
   },
   {
-    no: "07",
+    no: "08",
     slug: "echo",
     name: "Echo",
     tagline: "A teammate that never sleeps.",
@@ -124,18 +136,18 @@ const BOTS: BotEntry[] = [
     Visual: EchoVisual,
   },
   {
-    no: "08",
-    slug: "beacon",
-    name: "Beacon",
-    tagline: "Your creator's HQ.",
+    no: "09",
+    slug: "relay",
+    name: "Relay",
+    tagline: "Follow it everywhere.",
     description:
       "Stream alerts, clip archiver, sub-tier role sync. Twitch / YouTube / Kick in one bot. Built for the people whose community follows them across platforms.",
     status: "concept",
     category: "Engagement",
-    Visual: BeaconVisual,
+    Visual: RelayVisual,
   },
   {
-    no: "09",
+    no: "10",
     slug: "vault",
     name: "Vault",
     tagline: "Vote on what's next.",
@@ -819,7 +831,76 @@ function ChartItVisual() {
   );
 }
 
-// 04 — SALON: two members meeting across a connecting line
+// 04 — BEACON: a server climbing the directory ranks (ranked by activity, never bumps)
+function BeaconVisual() {
+  const reduce = useReducedMotion();
+  const [tick, setTick] = React.useState(reduce ? 3 : 0);
+  React.useEffect(() => {
+    if (reduce) return;
+    const id = setInterval(() => setTick((t) => (t + 1) % 5), 1200);
+    return () => clearInterval(id);
+  }, [reduce]);
+
+  const others: { id: string; name: string; online: number; you?: boolean }[] = [
+    { id: "s", name: "Stretch Trading", online: 310 },
+    { id: "b", name: "Balkan Rush RP", online: 460 },
+    { id: "p", name: "Polyglot Café", online: 60 },
+  ];
+  const pos = reduce ? 0 : Math.min(3, tick); // position of "you" from the top, 0..3
+  const ordered = [...others];
+  ordered.splice(3 - pos, 0, { id: "you", name: "Indie Game Devs", online: 140, you: true });
+
+  return (
+    <div className="absolute inset-0 overflow-hidden" style={{ background: "oklch(0.15 0.04 70)" }}>
+      {/* faint amber scanlines */}
+      <div
+        aria-hidden
+        className="absolute inset-0 opacity-40"
+        style={{
+          backgroundImage: "linear-gradient(to bottom, rgba(251,191,36,0.09) 1px, transparent 1px)",
+          backgroundSize: "100% 18%",
+        }}
+      />
+      <div className="absolute inset-0 flex flex-col justify-center gap-1.5 px-7">
+        <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.22em] text-[#fbbf24]/80">
+          servers / programming
+        </div>
+        {ordered.map((s, i) => (
+          <motion.div
+            key={s.id}
+            layout
+            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs"
+            style={
+              s.you
+                ? { background: "rgba(251,191,36,0.12)", color: "#fbbf24" }
+                : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.7)" }
+            }
+          >
+            <span className="w-4 font-mono text-[10px] text-white/35">#{i + 1}</span>
+            <span className="truncate font-semibold">{s.name}</span>
+            <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-[10px] text-white/45">
+              <span className="size-1.5 rounded-full bg-[#1cd47d]" />
+              {s.online} online
+            </span>
+          </motion.div>
+        ))}
+        <div className="mt-1 font-mono text-[10px] text-white/35">
+          {pos === 3 ? "· #1 in programming · no bump command" : "· climbing · no bump command"}
+        </div>
+      </div>
+      {/* Beacon lockup — lighthouse mark */}
+      <div className="absolute right-4 top-4 flex h-10 items-center gap-2 rounded-md bg-white/[0.04] px-2 backdrop-blur-sm ring-1 ring-white/10">
+        <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+          <path d="M12 2 9 9h6l-3-7Zm0 8.5 5.5 11h-11L12 10.5Z" fill="#fbbf24" />
+        </svg>
+        <span className="font-display text-xs font-bold tracking-wide text-white/90">Beacon</span>
+      </div>
+    </div>
+  );
+}
+
+// 05 — SALON: two members meeting across a connecting line
 function SalonVisual() {
   return (
     <div className="absolute inset-0" style={{ background: "oklch(0.18 0.04 350)" }}>
@@ -862,7 +943,7 @@ function SalonVisual() {
   );
 }
 
-// 05 — AURORA: aurora-gradient bands rising
+// 06 — AURORA: aurora-gradient bands rising
 function AuroraVisual() {
   return (
     <div className="absolute inset-0" style={{ background: "oklch(0.15 0.06 200)" }}>
@@ -895,7 +976,7 @@ function AuroraVisual() {
   );
 }
 
-// 06 — PULSE: chart sweep with a heartbeat line
+// 07 — PULSE: chart sweep with a heartbeat line
 function PulseVisual() {
   return (
     <div className="absolute inset-0" style={{ background: "oklch(0.16 0.04 145)" }}>
@@ -923,7 +1004,7 @@ function PulseVisual() {
   );
 }
 
-// 07 — ECHO: AI bubble typing
+// 08 — ECHO: AI bubble typing
 function EchoVisual() {
   return (
     <div className="absolute inset-0" style={{ background: "oklch(0.16 0.04 260)" }}>
@@ -955,8 +1036,8 @@ function EchoVisual() {
   );
 }
 
-// 08 — BEACON: radar sweep
-function BeaconVisual() {
+// 09 — RELAY: broadcast pulses across platforms
+function RelayVisual() {
   return (
     <div className="absolute inset-0 overflow-hidden" style={{ background: "oklch(0.15 0.05 30)" }}>
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -978,7 +1059,7 @@ function BeaconVisual() {
   );
 }
 
-// 09 — VAULT: stacked vote cards with progress
+// 10 — VAULT: stacked vote cards with progress
 function VaultVisual() {
   return (
     <div className="absolute inset-0" style={{ background: "oklch(0.17 0.04 220)" }}>

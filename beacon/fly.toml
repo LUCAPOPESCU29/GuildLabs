@@ -1,0 +1,44 @@
+# Beacon — Fly.io config
+# Beacon holds a persistent Discord gateway WebSocket and serves the public
+# pages from the same process, so the machine must never scale to zero.
+
+app = "beacon-bot"
+primary_region = "iad"   # Ashburn (close to Discord US East). Change with `fly regions set`.
+
+[build]
+  # Uses the Dockerfile in this directory.
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  DATA_DIR = "/data"
+  # Set BEACON_PUBLIC_URL to your Fly hostname or custom domain, e.g.
+  # BEACON_PUBLIC_URL = "https://beacon-bot.fly.dev"
+  # Secrets (DISCORD_TOKEN, CLIENT_ID, BEACON_ADMIN_USER_IDS) go in `fly secrets set`.
+
+# ── Persistent storage for beacon.sqlite + uploaded banners ──────────────────
+# Create once: fly volumes create beacon_data --size 1 --region iad
+[mounts]
+  source = "beacon_data"
+  destination = "/data"
+
+# ── HTTP service: public pages + /health ─────────────────────────────────────
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false       # NEVER stop — the gateway must stay connected
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 200
+
+[processes]
+  app = "node --disable-warning=ExperimentalWarning src/index.js"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
