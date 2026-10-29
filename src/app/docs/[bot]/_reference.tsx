@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { Search, Copy, Check } from "lucide-react";
+import { DiscordHelpCard } from "@/components/site/discord-help-card";
 import type { BotDocs, Command } from "@/lib/seo-data/docs";
 
 export function BotReference({ doc }: { doc: BotDocs }) {
@@ -101,6 +102,10 @@ export function BotReference({ doc }: { doc: BotDocs }) {
               ))}
             </div>
           </section>
+
+          <div className="mt-8">
+            <DiscordHelpCard />
+          </div>
         </div>
       </div>
     </main>

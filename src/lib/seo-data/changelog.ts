@@ -18,6 +18,33 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: "2026-08-29",
+    bot: "Construct",
+    title: "Check what's new without leaving Discord",
+    summary:
+      "Construct can now tell you what it just learned. Run /changelog in any server it's in and it renders the latest releases as embeds, pulled live from this page — so the bot and the site never drift apart. Its status line rotates through what's new too. We chose to make this something you ask for rather than something we DM you: unsolicited bot DMs are how bots get banned, and nobody wants an update notification they didn't sign up for.",
+    items: [
+      { type: "added", text: "/changelog in Construct — the latest releases as embeds, straight from this page" },
+      { type: "added", text: "A public changelog API at /api/changelog, so every bot can read the same entries" },
+      { type: "improved", text: "Construct's status line now rotates through what's new and the server count" },
+    ],
+  },
+  {
+    date: "2026-08-29",
+    bot: "Construct",
+    title: "Channels with real character — emoji, topics and per-channel settings",
+    summary:
+      "Servers Construct builds used to arrive as plain lowercase channel names. Now every channel and category comes with an emoji chosen for what it actually does — 📌 rules, 💬 general, 🎫 support, 🔊 Voice Chat — so a new server looks designed the moment it's created. Channels also carry real settings: a topic explaining what the channel is for, slowmode on the busy ones, age-restriction where it fits, and user limits on voice. Everything is editable before you deploy, with a searchable emoji picker built for Discord rather than a raw text box.",
+    items: [
+      { type: "added", text: "An emoji on every channel and category, picked to match its purpose — never repeated inside a category" },
+      { type: "added", text: "Emoji picker with search — type \"chat\" and get 💬, grouped by server / chat / gaming / work" },
+      { type: "added", text: "Per-channel settings: topic, slowmode, age-restriction, and voice user limits, each only offered where Discord actually supports it" },
+      { type: "added", text: "Roles can now be marked mentionable" },
+      { type: "improved", text: "The builder no longer dead-ends when the AI is unavailable — it falls back to a full, emoji-complete blueprint instead of showing an error" },
+      { type: "fixed", text: "Emoji survive deployment. Channel names are sanitised first and the emoji applied after, so they're no longer stripped on the way to Discord" },
+    ],
+  },
+  {
     date: "2026-06-15",
     bot: "Platform",
     title: "Meet Queen — the studio's 4th bot (coming soon)",

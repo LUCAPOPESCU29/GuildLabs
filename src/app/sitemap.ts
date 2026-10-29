@@ -32,6 +32,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/guides`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${base}/learn`, lastModified: now, changeFrequency: "monthly", priority: 0.8 },
     { url: `${base}/learn/course/greeter-bot`, lastModified: now, changeFrequency: "monthly", priority: 0.75 },
+    { url: `${base}/learn/course/moderation-bot`, lastModified: now, changeFrequency: "monthly", priority: 0.75 },
+    { url: `${base}/learn/course/how-bots-work`, lastModified: now, changeFrequency: "monthly", priority: 0.75 },
     { url: `${base}/stocks`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${base}/changelog`, lastModified: now, changeFrequency: "weekly", priority: 0.6 },
     { url: `${base}/status`, lastModified: now, changeFrequency: "daily", priority: 0.4 },

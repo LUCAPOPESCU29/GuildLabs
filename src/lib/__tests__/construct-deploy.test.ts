@@ -46,18 +46,20 @@ describe("aiBlueprintToDeployJSON", () => {
       categories: [
         {
           name: "INFO",
+          emoji: "📢",
           channels: [
             { name: "rules", type: "text" },
             { name: "Stage", type: "stage" },
           ],
         },
-        { name: "VOICE", channels: [{ name: "Lobby", type: "voice" }] },
+        { name: "VOICE", emoji: "🔊", channels: [{ name: "Lobby", type: "voice" }] },
       ],
       roles: [
         {
           name: "Admin",
           color: "#f43f5e",
           hoist: true,
+          mentionable: false,
           permissions: PERM_FLAGS.admin,
           permissionsLabel: PERM_PRESETS.admin,
         },
@@ -65,6 +67,7 @@ describe("aiBlueprintToDeployJSON", () => {
           name: "Member",
           color: "#a78bfa",
           hoist: false,
+          mentionable: false,
           permissions: PERM_FLAGS.member,
           permissionsLabel: PERM_PRESETS.member,
         },
@@ -141,5 +144,51 @@ describe("aiBlueprintToDeployJSON", () => {
   it("handles an empty permissions list", () => {
     const json = aiBlueprintToDeployJSON(makeBlueprint({ permissions: [] }));
     expect(json.permissions).toEqual([]);
+  });
+});
+
+describe("aiBlueprintToDeployJSON — channel customisation", () => {
+  it("passes emoji and options through as separate fields", () => {
+    const bp = {
+      name: "S", summary: "s", mixNote: "m",
+      categories: [
+        {
+          name: "MAIN",
+          emoji: "🏠",
+          channels: [
+            { name: "general", type: "text" as const, emoji: "💬", topic: "Chat", slowmode: 10, nsfw: true },
+            { name: "Lobby", type: "voice" as const, emoji: "🔊", userLimit: 10 },
+          ],
+        },
+      ],
+      roles: [{ name: "Admin", color: "#fff", hoist: true, mentionable: true, perms: PERM_PRESETS.admin }],
+      permissions: [],
+      stats: { categories: 1, channels: 2, voice: 1, roles: 1 },
+    };
+    const json = aiBlueprintToDeployJSON(bp);
+    const [text, voice] = json.categories[0].channels;
+
+    expect(json.categories[0].emoji).toBe("🏠");
+    // Emoji must NOT be baked into the name — the bot composes it after
+    // sanitising, or it would be stripped.
+    expect(text.name).toBe("general");
+    expect(text).toMatchObject({ emoji: "💬", topic: "Chat", slowmode: 10, nsfw: true });
+    expect(voice).toMatchObject({ emoji: "🔊", userLimit: 10 });
+    expect(json.roles[0].mentionable).toBe(true);
+  });
+
+  it("omits falsy options instead of sending zeroes", () => {
+    const bp = {
+      name: "S", summary: "s", mixNote: "m",
+      categories: [{ name: "M", emoji: "🏠", channels: [{ name: "a", type: "text" as const, emoji: "💬" }] }],
+      roles: [{ name: "A", color: "#fff", hoist: false, perms: PERM_PRESETS.member }],
+      permissions: [],
+      stats: { categories: 1, channels: 1, voice: 0, roles: 1 },
+    };
+    const ch = aiBlueprintToDeployJSON(bp).categories[0].channels[0];
+    expect(ch).not.toHaveProperty("slowmode");
+    expect(ch).not.toHaveProperty("nsfw");
+    expect(ch).not.toHaveProperty("userLimit");
+    expect(ch).not.toHaveProperty("topic");
   });
 });

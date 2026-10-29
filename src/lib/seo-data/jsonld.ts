@@ -92,6 +92,50 @@ export function softwareAppLd({
   };
 }
 
+/** Maps a human hours string like "4–6 hrs" to an ISO-8601 duration (uses the
+ * upper bound, e.g. "PT6H"). Falls back to PT1H if no number is found. */
+function hoursToIso(hours: string): string {
+  const nums = hours.match(/\d+/g);
+  const h = nums && nums.length ? Number(nums[nums.length - 1]) : 1;
+  return `PT${h}H`;
+}
+
+export function courseLd({
+  name,
+  description,
+  path,
+  level,
+  hours,
+  topics,
+}: {
+  name: string;
+  description: string;
+  path: string;
+  level: string;
+  hours: string;
+  topics?: string[];
+}) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "Course",
+    name,
+    description,
+    url: `${SITE_URL}${path}`,
+    educationalLevel: level,
+    timeRequired: hoursToIso(hours),
+    isAccessibleForFree: true,
+    inLanguage: "en",
+    ...(topics && topics.length ? { about: topics } : {}),
+    provider: { "@type": "Organization", name: SITE_NAME, url: SITE_URL },
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD", category: "Free" },
+    hasCourseInstance: {
+      "@type": "CourseInstance",
+      courseMode: "online",
+      courseWorkload: hoursToIso(hours),
+    },
+  };
+}
+
 export function itemListLd(items: Crumb[]) {
   return {
     "@context": "https://schema.org",

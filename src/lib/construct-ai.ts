@@ -24,7 +24,13 @@ export const CAPS = {
 export const CHANNEL_TYPES = ["text", "voice", "stage", "forum"] as const;
 export const PERM_KEYS = Object.keys(PERM_PRESETS) as PermPreset[];
 
-export const MODEL = "llama-3.3-70b-versatile";
+/**
+ * Groq decommissioned `llama-3.3-70b-versatile`; this is its live replacement.
+ * It's a reasoning model, so `groq.ts` pins `reasoning_effort: "low"` — that
+ * keeps reasoning ~40 tokens instead of ~1200, which both leaves room for the
+ * blueprint JSON inside `max_tokens` and stays under the free-tier TPM budget.
+ */
+export const MODEL = "openai/gpt-oss-120b";
 
 // ── Wire types ────────────────────────────────────────────────────────────────
 
@@ -53,12 +59,21 @@ export type RawBlueprint = {
   categories: Array<{
     name: string;
     emoji?: string;
-    channels: Array<{ name: string; type?: string }>;
+    channels: Array<{
+      name: string;
+      type?: string;
+      emoji?: string;
+      topic?: string;
+      slowmode?: number;
+      nsfw?: boolean;
+      userLimit?: number;
+    }>;
   }>;
   roles: Array<{
     name: string;
     color?: string;
     hoist?: boolean;
+    mentionable?: boolean;
     perms?: string;
   }>;
   permissions?: string[];
@@ -123,10 +138,13 @@ function numBefore(text: string, keyword: string): number | null {
   return nums ? parseInt(nums[nums.length - 1], 10) : null;
 }
 
-const CHANNEL_PAD_POOL = [
-  "lounge", "media", "polls", "clips", "events", "resources", "feedback",
-  "introductions", "off-topic", "memes", "wins", "watchlist", "ideas", "news",
-  "alerts", "questions", "showcase", "support", "general-chat", "daily-discussion",
+/** Padded channels carry their own emoji so a padded server still looks designed. */
+const CHANNEL_PAD_POOL: [string, string][] = [
+  ["lounge", "🛋"], ["media", "🖼"], ["polls", "📊"], ["clips", "🎬"],
+  ["events", "📅"], ["resources", "📚"], ["feedback", "💡"], ["introductions", "👋"],
+  ["off-topic", "🎲"], ["memes", "😂"], ["wins", "🏆"], ["watchlist", "👀"],
+  ["ideas", "🧠"], ["news", "📰"], ["alerts", "🔔"], ["questions", "❓"],
+  ["showcase", "✨"], ["support", "🎫"], ["general-chat", "💬"], ["daily-discussion", "🗓"],
 ];
 const ROLE_PAD_POOL = [
   "Member", "Regular", "Active", "Contributor", "Supporter", "Veteran", "VIP",
@@ -155,13 +173,13 @@ export function enforceCounts(bp: Blueprint, description: string): Blueprint {
     let total = categories.reduce((n, c) => n + c.channels.length, 0);
     let i = 0;
     while (total < cap && i < CHANNEL_PAD_POOL.length * 4 && target) {
-      const base = CHANNEL_PAD_POOL[i % CHANNEL_PAD_POOL.length];
+      const [base, emoji] = CHANNEL_PAD_POOL[i % CHANNEL_PAD_POOL.length];
       const suffix = i >= CHANNEL_PAD_POOL.length ? `-${Math.floor(i / CHANNEL_PAD_POOL.length) + 1}` : "";
       const name = `${base}${suffix}`;
       i++;
       if (seen.has(name.toLowerCase())) continue;
       seen.add(name.toLowerCase());
-      target.channels.push({ name, type: "text" });
+      target.channels.push({ name, type: "text", emoji });
       total++;
     }
   }
@@ -210,21 +228,36 @@ Output ONLY a JSON object (no markdown, no prose) matching EXACTLY this schema:
       "name": string,                   // UPPERCASE short label, e.g. "INFO", <= 24 chars
       "emoji": string,                  // a single emoji for the category
       "channels": [                     // 1-${CAPS.channelsPerCategory} channels
-        { "name": string,               // lowercase-kebab for text, Title Case for voice, <= 24 chars
-          "type": one of ${JSON.stringify(CHANNEL_TYPES)} }
+        { "name": string,               // lowercase-kebab for text, Title Case for voice, <= 24 chars.
+                                        // NO emoji inside the name — use the emoji field.
+          "type": one of ${JSON.stringify(CHANNEL_TYPES)},
+          "emoji": string,              // ONE emoji matching this channel's purpose
+          "topic": string,              // OPTIONAL <= 140 chars, what the channel is for. Omit for voice.
+          "slowmode": number,           // OPTIONAL seconds 0-21600. Only 5-30 on busy chat channels; omit otherwise.
+          "nsfw": boolean,              // OPTIONAL, only when the description clearly calls for it
+          "userLimit": number }         // OPTIONAL, voice/stage only, 0-99. Omit for unlimited.
       ]
     }
   ],
   "roles": [                            // 2-${CAPS.roles} roles, highest authority first
     {
-      "name": string,                   // <= 24 chars
+      "name": string,                   // <= 24 chars. An emoji prefix is welcome, e.g. "🛡 Moderator"
       "color": string,                  // hex like "#5865f2"; prefer these: ${palette}
       "hoist": boolean,                 // show separately in the member list
+      "mentionable": boolean,           // can members @mention this role
       "perms": one of ${permList}       // use the KEY only, e.g. "mod"
     }
   ],
   "permissions": [string]               // 3-8 plain-English notes about access & moderation
 }
+
+EMOJI RULES — these carry most of the visual quality:
+- Every channel and every category gets exactly ONE emoji. Never zero, never two.
+- Choose emoji that describe purpose, not decoration.
+  Good: 📌 rules, 💬 general, 🎮 gaming, 🎫 support, 📢 announcements, 🔊 Voice Chat.
+  Bad: reusing ✨ or 🔹 everywhere, or emoji unrelated to the channel.
+- Never repeat an emoji within the same category, and keep a category's emoji
+  different from its own channels'.
 
 Rules:
 - Design for the SPECIFIC community described. Reflect their audience, size, languages, vibe and topics in the channel and role names.

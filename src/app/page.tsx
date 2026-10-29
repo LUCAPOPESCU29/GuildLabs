@@ -36,6 +36,7 @@ import { Showcase } from "@/components/sections/showcase";
 import { QueenTeaser } from "@/components/sections/queen-teaser";
 import { TickerSearch } from "@/components/ticker-search";
 import { TickerMarquee } from "@/components/ticker-marquee";
+import { DiscordHelpCard } from "@/components/site/discord-help-card";
 import { AnimatedHeading } from "@/components/motion/animated-heading";
 import { SpotlightCard } from "@/components/fx/spotlight-card";
 import { TiltCard } from "@/components/fx/tilt-card";
@@ -489,6 +490,16 @@ export default function Home() {
             </div>
           </div>
         </Reveal>
+      </section>
+
+      {/* direct help — reach the maker */}
+      <section className="px-4 pb-20">
+        <div className="mx-auto max-w-6xl">
+          <DiscordHelpCard
+            title="Questions? Talk to the maker."
+            body="Building a server or self-hosting and something isn't working? Message me on Discord and I'll help you get it sorted."
+          />
+        </div>
       </section>
 
       {/* builder */}

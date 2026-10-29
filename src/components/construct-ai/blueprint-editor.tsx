@@ -29,8 +29,7 @@ import {
   MessageSquare,
   Plus,
   Trash2,
-  ShieldCheck,
-} from "lucide-react";
+  ShieldCheck, SlidersHorizontal } from "lucide-react";
 import {
   PERM_PRESETS,
   PERM_PRESET_LABELS,
@@ -39,13 +38,25 @@ import {
   type Blueprint,
   type Channel,
   type PermPreset,
+  DEFAULT_CHANNEL_EMOJI,
+  MAX_USER_LIMIT,
 } from "@/lib/blueprint";
 import { CHANNEL_TYPES } from "@/lib/construct-ai";
+import { EmojiButton } from "@/components/ui/emoji-picker";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 // ── Internal editable model (Blueprint has no ids; we add stable ones) ────────
-type EChannel = { id: string; name: string; type: Channel["type"] };
+type EChannel = {
+  id: string;
+  name: string;
+  type: Channel["type"];
+  emoji: string;
+  topic: string;
+  slowmode: number;
+  nsfw: boolean;
+  userLimit: number;
+};
 type ECategory = { id: string; name: string; emoji: string; channels: EChannel[] };
 type ERole = { id: string; name: string; color: string; hoist: boolean; perms: PermPreset };
 type EditModel = { categories: ECategory[]; roles: ERole[] };
@@ -66,7 +77,16 @@ function toModel(bp: Blueprint): EditModel {
       id: uid("cat"),
       name: c.name,
       emoji: c.emoji,
-      channels: c.channels.map((ch) => ({ id: uid("chn"), name: ch.name, type: ch.type })),
+      channels: c.channels.map((ch) => ({
+        id: uid("chn"),
+        name: ch.name,
+        type: ch.type,
+        emoji: ch.emoji ?? "",
+        topic: ch.topic ?? "",
+        slowmode: ch.slowmode ?? 0,
+        nsfw: ch.nsfw ?? false,
+        userLimit: ch.userLimit ?? 0,
+      })),
     })),
     roles: bp.roles.map((r) => ({
       id: uid("rol"),
@@ -82,7 +102,20 @@ function serialize(name: string, model: EditModel, base: Blueprint): Blueprint {
   const categories = model.categories.map((c) => ({
     name: c.name.trim() || "GENERAL",
     emoji: c.emoji || "📁",
-    channels: c.channels.map((ch) => ({ name: ch.name.trim() || "channel", type: ch.type })),
+    // Mirror the validator: only emit options the channel kind supports, and
+    // drop zero values so the deploy payload stays clean.
+    channels: c.channels.map((ch) => {
+      const isVoice = ch.type === "voice" || ch.type === "stage";
+      return {
+        name: ch.name.trim() || "channel",
+        type: ch.type,
+        ...(ch.emoji ? { emoji: ch.emoji } : {}),
+        ...(!isVoice && ch.topic.trim() ? { topic: ch.topic.trim() } : {}),
+        ...(!isVoice && ch.slowmode > 0 ? { slowmode: ch.slowmode } : {}),
+        ...(!isVoice && ch.nsfw ? { nsfw: true } : {}),
+        ...(isVoice && ch.userLimit > 0 ? { userLimit: ch.userLimit } : {}),
+      };
+    }),
   }));
   const roles = model.roles.map((r) => ({
     name: r.name.trim() || "Role",
@@ -255,7 +288,16 @@ export function BlueprintEditor({
       ...model,
       categories: model.categories.map((c) =>
         c.id === catId
-          ? { ...c, channels: [...c.channels, { id: uid("chn"), name: "new-channel", type: "text" as const }] }
+          ? { ...c, channels: [...c.channels, {
+                id: uid("chn"),
+                name: "new-channel",
+                type: "text" as const,
+                emoji: DEFAULT_CHANNEL_EMOJI.text,
+                topic: "",
+                slowmode: 0,
+                nsfw: false,
+                userLimit: 0,
+              }] }
           : c
       ),
     });
@@ -478,16 +520,24 @@ function ChannelRow({
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: ch.id });
   const style = { transform: CSS.Translate.toString(transform), transition };
+  const [open, setOpen] = React.useState(false);
+  const isVoice = ch.type === "voice" || ch.type === "stage";
+  // Count only the options that apply to this channel kind, so a voice channel
+  // never advertises a slowmode it can't have.
+  const activeCount =
+    (isVoice ? 0 : (ch.topic.trim() ? 1 : 0) + (ch.slowmode > 0 ? 1 : 0) + (ch.nsfw ? 1 : 0)) +
+    (isVoice && ch.userLimit > 0 ? 1 : 0);
 
   return (
     <li
       ref={setNodeRef}
       style={style}
       className={cn(
-        "flex items-center gap-1.5 rounded-lg bg-muted/40 px-1.5 py-1",
+        "rounded-lg bg-muted/40 px-1.5 py-1",
         isDragging && "opacity-40"
       )}
     >
+     <div className="flex items-center gap-1.5">
       <Tooltip content="Drag to reorder or move" side="left">
         <button
           {...attributes}
@@ -499,6 +549,11 @@ function ChannelRow({
         </button>
       </Tooltip>
       <ChannelTypeIcon type={ch.type} className="size-3.5 shrink-0 text-muted-foreground" />
+      <EmojiButton
+        value={ch.emoji}
+        onChange={(emoji) => onEdit({ emoji })}
+        label={`Emoji for ${ch.name}`}
+      />
       <input
         value={ch.name}
         onChange={(e) => onEdit({ name: e.target.value })}
@@ -520,6 +575,22 @@ function ChannelRow({
           </option>
         ))}
       </select>
+      <Tooltip content="Channel options" side="top">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-label={`Options for ${ch.name}`}
+          aria-expanded={open}
+          className={cn(
+            "relative grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-primary/15 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer",
+            open && "bg-primary/15 text-primary"
+          )}
+        >
+          <SlidersHorizontal className="size-3.5" />
+          {activeCount > 0 && !open && (
+            <span className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary" />
+          )}
+        </button>
+      </Tooltip>
       <button
         onClick={onRemove}
         aria-label={`Remove channel ${ch.name}`}
@@ -527,9 +598,75 @@ function ChannelRow({
       >
         <Trash2 className="size-3.5" />
       </button>
+     </div>
+
+      {open && (
+        <div className="mt-1.5 space-y-2 rounded-lg border border-card-border bg-background/60 p-2.5">
+          {isVoice ? (
+            <label className="flex items-center justify-between gap-3 text-xs">
+              <span className="text-muted-foreground">User limit</span>
+              <span className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  max={MAX_USER_LIMIT}
+                  value={ch.userLimit}
+                  onChange={(e) =>
+                    onEdit({ userLimit: Math.max(0, Math.min(MAX_USER_LIMIT, Number(e.target.value) || 0)) })
+                  }
+                  className="w-16 rounded border border-card-border bg-background px-1.5 py-1 text-right tabular-nums outline-none focus:border-primary/60"
+                />
+                <span className="w-12 text-muted-foreground">
+                  {ch.userLimit === 0 ? "∞" : "users"}
+                </span>
+              </span>
+            </label>
+          ) : (
+            <>
+              <label className="block text-xs">
+                <span className="text-muted-foreground">Topic</span>
+                <input
+                  value={ch.topic}
+                  onChange={(e) => onEdit({ topic: e.target.value.slice(0, 140) })}
+                  placeholder="What is this channel for?"
+                  className="mt-1 w-full rounded border border-card-border bg-background px-2 py-1 outline-none focus:border-primary/60"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-muted-foreground">Slowmode</span>
+                <select
+                  value={ch.slowmode}
+                  onChange={(e) => onEdit({ slowmode: Number(e.target.value) })}
+                  className="rounded border border-card-border bg-background px-1.5 py-1 outline-none focus:border-primary/60 cursor-pointer"
+                >
+                  {SLOWMODE_STEPS.map(([v, l]) => (
+                    <option key={v} value={v}>{l}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex cursor-pointer items-center justify-between gap-3 text-xs">
+                <span className="text-muted-foreground">Age-restricted (NSFW)</span>
+                <input
+                  type="checkbox"
+                  checked={ch.nsfw}
+                  onChange={(e) => onEdit({ nsfw: e.target.checked })}
+                  className="size-4 cursor-pointer accent-[var(--primary)]"
+                />
+              </label>
+            </>
+          )}
+        </div>
+      )}
     </li>
   );
 }
+
+/** Discord only accepts these exact slowmode values in its own UI. */
+const SLOWMODE_STEPS: [number, string][] = [
+  [0, "Off"], [5, "5s"], [10, "10s"], [15, "15s"], [30, "30s"],
+  [60, "1m"], [120, "2m"], [300, "5m"], [600, "10m"], [900, "15m"],
+  [1800, "30m"], [3600, "1h"], [7200, "2h"], [21600, "6h"],
+];
 
 // ── Role row ───────────────────────────────────────────────────────────────────
 function RoleRow({

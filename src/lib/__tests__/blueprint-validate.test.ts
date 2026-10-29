@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { validateBlueprint, BlueprintInvalid } from "@/lib/blueprint-validate";
-import { PERM_PRESETS, ROLE_PALETTE } from "@/lib/blueprint";
+import { PERM_PRESETS, channelDisplayName, channelEmojiFor, ROLE_PALETTE } from "@/lib/blueprint";
 import { CAPS } from "@/lib/construct-ai";
 
 /** A minimal valid raw blueprint the model could plausibly emit. */
@@ -28,11 +28,15 @@ describe("validateBlueprint — happy path", () => {
     expect(bp.name).toBe("Test Server");
     expect(bp.summary).toBe("A test.");
     expect(bp.categories).toHaveLength(1);
-    expect(bp.categories[0].channels).toEqual([{ name: "general", type: "text" }]);
+    // Channels now carry an emoji; one is defaulted per type when absent.
+    expect(bp.categories[0].channels).toEqual([
+      { name: "general", type: "text", emoji: "💬" },
+    ]);
     expect(bp.roles[0]).toEqual({
       name: "Admin",
       color: "#f43f5e",
       hoist: true,
+      mentionable: false,
       perms: PERM_PRESETS.admin,
     });
     expect(bp.stats).toEqual({ categories: 1, channels: 1, voice: 0, roles: 1 });
@@ -349,5 +353,89 @@ describe("validateBlueprint — role hierarchy guarantees", () => {
       minimalRaw({ permissions: ["  keep me  ", "", "   ", null, 5, "two"] })
     );
     expect(bp.permissions).toEqual(["keep me", "5", "two"]);
+  });
+});
+
+describe("validateBlueprint — emoji & channel config", () => {
+  const withChannels = (channels: unknown[]) =>
+    validateBlueprint(
+      minimalRaw({ categories: [{ name: "INFO", emoji: "📁", channels }] })
+    ).categories[0].channels;
+
+  it("keeps a valid emoji and strips trailing text", () => {
+    expect(withChannels([{ name: "rules", type: "text", emoji: "📌 pinned" }])[0].emoji).toBe("📌");
+  });
+
+  it("falls back to a per-type default for junk emoji", () => {
+    expect(withChannels([{ name: "a", type: "text", emoji: ":smile:" }])[0].emoji).toBe("💬");
+    expect(withChannels([{ name: "b", type: "voice", emoji: "" }])[0].emoji).toBe("🔊");
+    expect(withChannels([{ name: "c", type: "forum", emoji: "x" }])[0].emoji).toBe("🧵");
+  });
+
+  it("preserves multi-codepoint emoji intact", () => {
+    expect(withChannels([{ name: "fam", type: "text", emoji: "👨‍👩‍👧" }])[0].emoji).toBe("👨‍👩‍👧");
+    expect(withChannels([{ name: "uk", type: "text", emoji: "🇬🇧" }])[0].emoji).toBe("🇬🇧");
+  });
+
+  it("clamps slowmode to Discord's 6-hour maximum", () => {
+    expect(withChannels([{ name: "a", type: "text", slowmode: 999_999 }])[0].slowmode).toBe(21_600);
+  });
+
+  it("drops text-only options from voice channels", () => {
+    const [voice] = withChannels([
+      { name: "Voice", type: "voice", topic: "nope", slowmode: 30, nsfw: true, userLimit: 5 },
+    ]);
+    expect(voice.topic).toBeUndefined();
+    expect(voice.slowmode).toBeUndefined();
+    expect(voice.nsfw).toBeUndefined();
+    expect(voice.userLimit).toBe(5);
+  });
+
+  it("drops voice-only options from text channels and clamps userLimit", () => {
+    const [text] = withChannels([{ name: "chat", type: "text", userLimit: 500 }]);
+    expect(text.userLimit).toBeUndefined();
+    const [voice] = withChannels([{ name: "V", type: "voice", userLimit: 500 }]);
+    expect(voice.userLimit).toBe(99);
+  });
+
+  it("omits zero-value options rather than sending noise to Discord", () => {
+    const [ch] = withChannels([{ name: "a", type: "text", slowmode: 0, nsfw: false }]);
+    expect(ch.slowmode).toBeUndefined();
+    expect(ch.nsfw).toBeUndefined();
+  });
+});
+
+describe("channelDisplayName", () => {
+  it("uses a middle dot for text and a space for voice", () => {
+    expect(channelDisplayName({ name: "general", type: "text", emoji: "💬" })).toBe("💬・general");
+    expect(channelDisplayName({ name: "Voice Chat", type: "voice", emoji: "🔊" })).toBe("🔊 Voice Chat");
+  });
+
+  it("returns the bare name when there is no emoji", () => {
+    expect(channelDisplayName({ name: "general", type: "text" })).toBe("general");
+  });
+});
+
+describe("channelEmojiFor", () => {
+  it("matches on whole words, not substrings", () => {
+    // "off-topic" contains "pic" — it must not be treated as a picture channel.
+    expect(channelEmojiFor("off-topic", "text")).toBe("🎲");
+    expect(channelEmojiFor("pet-pics", "text")).toBe("🖼");
+  });
+
+  it("does not give voice channels a chat emoji", () => {
+    expect(channelEmojiFor("General VC", "voice")).toBe("🔊");
+    expect(channelEmojiFor("general", "text")).toBe("💬");
+  });
+
+  it("uses voice-appropriate emoji for known voice names", () => {
+    expect(channelEmojiFor("Staff VC", "voice")).toBe("🛡");
+    expect(channelEmojiFor("squad-1", "voice")).toBe("🤝");
+    expect(channelEmojiFor("Stage", "stage")).toBe("🎙");
+  });
+
+  it("falls back to the type default when nothing matches", () => {
+    expect(channelEmojiFor("zzzz", "text")).toBe("💬");
+    expect(channelEmojiFor("zzzz", "forum")).toBe("🧵");
   });
 });

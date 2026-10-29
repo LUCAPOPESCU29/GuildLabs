@@ -16,11 +16,25 @@ export type DeployJSON = {
     features: string[];
     advanced: string[];
   };
-  categories: { name: string; channels: { name: string; type: string }[] }[];
+  categories: {
+    name: string;
+    /** Sent separately from the name; the bot composes them after sanitising. */
+    emoji?: string;
+    channels: {
+      name: string;
+      type: string;
+      emoji?: string;
+      topic?: string;
+      slowmode?: number;
+      nsfw?: boolean;
+      userLimit?: number;
+    }[];
+  }[];
   roles: {
     name: string;
     color: string;
     hoist: boolean;
+    mentionable: boolean;
     /** Explicit Discord permission flag names, applied verbatim by the bot. */
     permissions: string[];
     /** Human-readable summary for display/debugging. */
@@ -40,14 +54,27 @@ export function aiBlueprintToDeployJSON(bp: Blueprint): DeployJSON {
       features: hasVoice ? ["voice"] : [],
       advanced: [],
     },
+    // Emoji stay in their own field rather than baked into the name: the bot
+    // sanitises names (stripping non-alphanumerics) before composing, so a
+    // pre-composed emoji would be scrubbed off.
     categories: bp.categories.map((c) => ({
       name: c.name,
-      channels: c.channels.map((ch) => ({ name: ch.name, type: ch.type })),
+      emoji: c.emoji,
+      channels: c.channels.map((ch) => ({
+        name: ch.name,
+        type: ch.type,
+        ...(ch.emoji ? { emoji: ch.emoji } : {}),
+        ...(ch.topic ? { topic: ch.topic } : {}),
+        ...(ch.slowmode ? { slowmode: ch.slowmode } : {}),
+        ...(ch.nsfw ? { nsfw: true } : {}),
+        ...(ch.userLimit ? { userLimit: ch.userLimit } : {}),
+      })),
     })),
     roles: bp.roles.map((r) => ({
       name: r.name,
       color: r.color,
       hoist: r.hoist,
+      mentionable: r.mentionable ?? false,
       permissions: permsToFlags(r.perms),
       permissionsLabel: r.perms,
     })),

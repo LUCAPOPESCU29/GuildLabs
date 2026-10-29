@@ -81,7 +81,17 @@ export function SiteFooter() {
         </div>
 
         <div className="mt-12 flex flex-col items-start justify-between gap-3 border-t border-card-border pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center">
-          <span>© {new Date().getFullYear()} GuildLabs. Not affiliated with Discord Inc.</span>
+          <span>
+            © {new Date().getFullYear()} GuildLabs. Not affiliated with Discord Inc. ·{" "}
+            <a
+              href="https://discord.com/users/1060616694189527160"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="transition-colors hover:text-foreground"
+            >
+              Contact me on Discord
+            </a>
+          </span>
           <span>Market data is informational only — not financial advice.</span>
         </div>
       </div>

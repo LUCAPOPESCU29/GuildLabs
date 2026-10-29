@@ -1,9 +1,92 @@
 /* The "AI" core: turns wizard selections into a deployable server blueprint.
    It suggests smart defaults per type, merges multiple types, and emits JSON. */
 
-export type Channel = { name: string; type: "text" | "voice" | "stage" | "forum" };
+export type ChannelKind = "text" | "voice" | "stage" | "forum" | "announcement";
+
+/** Longest slowmode Discord accepts, in seconds (6 hours). */
+export const MAX_SLOWMODE = 21_600;
+/** Discord's cap on a voice channel's user limit (0 = unlimited). */
+export const MAX_USER_LIMIT = 99;
+export const MAX_TOPIC = 1024;
+
+export type Channel = {
+  name: string;
+  type: ChannelKind;
+  /** Rendered into the channel name at deploy time, e.g. 💬・general */
+  emoji?: string;
+  /** Channel topic / description. Text-like channels only. */
+  topic?: string;
+  /** Slowmode in seconds, 0–21600. Text-like channels only. */
+  slowmode?: number;
+  /** Age-restricted. Text-like channels only. */
+  nsfw?: boolean;
+  /** Voice/stage only. 0 = unlimited. */
+  userLimit?: number;
+};
+
 export type Category = { name: string; emoji: string; channels: Channel[] };
-export type Role = { name: string; color: string; hoist: boolean; perms: string };
+
+export type Role = {
+  name: string;
+  color: string;
+  hoist: boolean;
+  perms: string;
+  /** Whether @mentioning the role is allowed. */
+  mentionable?: boolean;
+};
+
+/** Sensible per-type emoji, used when the model omits one. */
+export const DEFAULT_CHANNEL_EMOJI: Record<ChannelKind, string> = {
+  text: "💬",
+  voice: "🔊",
+  stage: "🎙",
+  forum: "🧵",
+  announcement: "📢",
+};
+
+/**
+ * Coerce arbitrary input down to exactly one emoji.
+ *
+ * Models happily return "🎮 gaming", ":video_game:", "" or three emoji in a row.
+ * We take the first grapheme cluster (so multi-codepoint emoji like 👨‍👩‍👧 or 🇬🇧
+ * survive intact) and keep it only if it's actually pictographic — otherwise the
+ * fallback wins, which is why a channel never ends up with a stray letter as its
+ * "emoji".
+ */
+export function sanitizeEmoji(input: unknown, fallback = ""): string {
+  const raw = typeof input === "string" ? input.trim() : "";
+  if (!raw) return fallback;
+
+  let first = raw;
+  // Intl.Segmenter keeps ZWJ sequences and flags together; older runtimes fall
+  // back to Array.from, which at least splits on code points rather than units.
+  try {
+    const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    const it = seg.segment(raw)[Symbol.iterator]().next();
+    if (!it.done) first = it.value.segment;
+  } catch {
+    first = Array.from(raw)[0] ?? "";
+  }
+
+  return /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(first) ? first : fallback;
+}
+
+/** Channel kinds that accept a topic, slowmode and the NSFW flag. */
+export const TEXT_LIKE: ChannelKind[] = ["text", "forum", "announcement"];
+export const VOICE_LIKE: ChannelKind[] = ["voice", "stage"];
+
+/**
+ * Compose the deployable channel name. The emoji lives in its own field so the
+ * editor and AI can reason about the label alone; only here do they combine.
+ * Text channels get a middle dot (Discord keeps it and it reads cleanly once
+ * spaces are normalised to dashes); voice channels keep a plain space.
+ */
+export function channelDisplayName(ch: Channel): string {
+  const label = (ch.name ?? "").trim();
+  const emoji = (ch.emoji ?? "").trim();
+  if (!emoji) return label;
+  return VOICE_LIKE.includes(ch.type) ? `${emoji} ${label}` : `${emoji}・${label}`;
+}
 
 /* Permission presets — map a friendly preset to a Discord-realistic perm summary.
    Centralized here so the wizard selector, blueprint, preview and JSON all agree. */
@@ -169,8 +252,66 @@ export const initialState: WizardState = {
   advanced: ["welcome", "autorole"],
 };
 
-const TEXT = (name: string): Channel => ({ name, type: "text" });
-const VOICE = (name: string): Channel => ({ name, type: "voice" });
+/**
+ * Channel-name → emoji hints, most specific first.
+ *
+ * The wizard and the offline fallback build channels from fixed pools, so
+ * deriving the emoji from the name keeps every path emoji-complete without
+ * hand-annotating each entry — and keeps them consistent with what the model
+ * picks for the same channel names.
+ */
+const NAME_EMOJI: [RegExp, string][] = [
+  [/\bwelcome\b|\bintro(duction)?s?\b/, "👋"],
+  [/\brules?\b/, "📌"],
+  [/\bannounce\w*\b|\bnews\b/, "📢"],
+  [/\bdisclaimers?\b|\blegal\b/, "⚖"],
+  [/\bschedule\b|\bcalendar\b|\bevents?\b/, "📅"],
+  [/\bstaff\b|\bmod-?logs?\b/, "🛡"],
+  [/\blogs?\b|\baudit\b/, "📋"],
+  [/\bhelp\b|\bsupport\b|\btickets?\b/, "🎫"],
+  [/\bbugs?\b|\bissues?\b/, "🐛"],
+  [/\bbot-?commands?\b|\bcommands?\b/, "🤖"],
+  [/\bmemes?\b/, "😂"],
+  [/\bclips?\b|\bhighlights?\b/, "🎬"],
+  // "off-topic" contains "pic" — \b prevents that false match.
+  [/\bpics?\b|\bphotos?\b|\bimages?\b|\bpets?\b|\bgallery\b/, "🖼"],
+  [/\bmusic\b|\bnow-?playing\b|\bjam\b|\blistening\b/, "🎵"],
+  [/\blfg\b|\bsquads?\b|\bteams?\b/, "🤝"],
+  [/\bgames?\b|\bgaming\b/, "🎮"],
+  [/\bstudy\b|\bhomework\b|\bclass\b|\bresources?\b|\bschool\b/, "📚"],
+  [/\bshowcase\b|\bwip\b|\binspiration\b|\bcreative\b/, "🎨"],
+  [/\bfeedback\b|\bsuggestions?\b|\bideas?\b/, "💡"],
+  [/\bdev\b|\bcode\b|\btech\b/, "💻"],
+  [/\bmarket\b|\bprices?\b|\balpha\b|\btrading\b/, "📈"],
+  [/\balerts?\b/, "🔔"],
+  [/\boff-?topic\b|\brandom\b/, "🎲"],
+  [/\bgeneral\b|\bchat\b|\btalk\b/, "💬"],
+];
+
+/**
+ * Voice channels get their own pass first. Without it "General VC" matches the
+ * text rule for /general/ and ends up with a 💬 chat bubble on a voice channel.
+ */
+const VOICE_NAME_EMOJI: [RegExp, string][] = [
+  [/\bstaff\b/, "🛡"],
+  [/\bmusic\b|\bjam\b|\blistening\b|\bkaraoke\b/, "🎵"],
+  [/\bstudy\b|\bfocus\b/, "📚"],
+  [/\bsquads?\b|\bteams?\b|\bparty\b/, "🤝"],
+  [/\bstage\b|\bpodcast\b|\bmic\b/, "🎙"],
+  [/\bgames?\b|\bgaming\b/, "🎮"],
+  [/\bafk\b/, "💤"],
+];
+
+/** Pick an emoji for a channel from its name, falling back to its type. */
+export function channelEmojiFor(name: string, type: ChannelKind): string {
+  const n = name.toLowerCase();
+  const table = VOICE_LIKE.includes(type) ? VOICE_NAME_EMOJI : NAME_EMOJI;
+  for (const [re, emoji] of table) if (re.test(n)) return emoji;
+  return DEFAULT_CHANNEL_EMOJI[type];
+}
+
+const TEXT = (name: string): Channel => ({ name, type: "text", emoji: channelEmojiFor(name, "text") });
+const VOICE = (name: string): Channel => ({ name, type: "voice", emoji: channelEmojiFor(name, "voice") });
 
 /* Per-type smart channel defaults the "AI" injects into matching categories. */
 const TYPE_CHANNELS: Record<string, Partial<Record<string, Channel[]>>> = {
@@ -210,7 +351,7 @@ const BASE_CATEGORY: Record<string, { emoji: string; channels: Channel[] }> = {
   INFO: { emoji: "📢", channels: [TEXT("welcome"), TEXT("rules"), TEXT("announcements")] },
   CHAT: { emoji: "💬", channels: [TEXT("general")] },
   VOICE: { emoji: "🔊", channels: [VOICE("General VC")] },
-  EVENTS: { emoji: "📅", channels: [TEXT("event-info"), { name: "Stage", type: "stage" }] },
+  EVENTS: { emoji: "📅", channels: [TEXT("event-info"), { name: "Stage", type: "stage", emoji: channelEmojiFor("Stage", "stage") }] },
   SUPPORT: { emoji: "🛟", channels: [TEXT("get-help")] },
   FUN: { emoji: "🎮", channels: [TEXT("bot-commands")] },
   STAFF: { emoji: "🛡️", channels: [TEXT("staff-chat"), TEXT("mod-log"), VOICE("Staff VC")] },
@@ -397,7 +538,15 @@ export function toJSON(state: WizardState, bp: Blueprint) {
     },
     categories: bp.categories.map((c) => ({
       name: c.name,
-      channels: c.channels.map((ch) => ({ name: ch.name, type: ch.type })),
+      channels: c.channels.map((ch) => ({
+        name: ch.name,
+        type: ch.type,
+        ...(ch.emoji ? { emoji: ch.emoji } : {}),
+        ...(ch.topic ? { topic: ch.topic } : {}),
+        ...(ch.slowmode ? { slowmode: ch.slowmode } : {}),
+        ...(ch.nsfw ? { nsfw: true } : {}),
+        ...(ch.userLimit ? { userLimit: ch.userLimit } : {}),
+      })),
     })),
     roles: bp.roles.map((r) => ({
       name: r.name,

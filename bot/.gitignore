@@ -1,0 +1,5 @@
+node_modules/
+.env
+*.log
+# Keep data directory tracked but ignore sensitive files if any
+# data/ is intentionally tracked for config persistence

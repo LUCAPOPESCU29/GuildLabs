@@ -18,6 +18,12 @@ import {
   type Blueprint,
   type Category,
   type Channel,
+  sanitizeEmoji,
+  DEFAULT_CHANNEL_EMOJI,
+  VOICE_LIKE,
+  MAX_SLOWMODE,
+  MAX_USER_LIMIT,
+  MAX_TOPIC,
   type Role,
   type PermPreset,
 } from "./blueprint";
@@ -26,10 +32,25 @@ import { CAPS, CHANNEL_TYPES, PERM_KEYS } from "./construct-ai";
 const HEX = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
+/** Coerce to an integer inside [min, max]; anything unparseable becomes min. */
+function clampInt(v: unknown, min: number, max: number): number {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n)) return min;
+  return Math.min(max, Math.max(min, n));
+}
+
 /** Intermediate, fully-coerced shape (perms still as a preset key). */
-type NormChannel = { name: string; type: Channel["type"] };
+type NormChannel = {
+  name: string;
+  type: Channel["type"];
+  emoji: string;
+  topic: string;
+  slowmode: number;
+  nsfw: boolean;
+  userLimit: number;
+};
 type NormCategory = { name: string; emoji: string; channels: NormChannel[] };
-type NormRole = { name: string; color: string; hoist: boolean; perms: PermPreset };
+type NormRole = { name: string; color: string; hoist: boolean; mentionable: boolean; perms: PermPreset };
 type Norm = {
   name: string;
   summary: string;
@@ -50,6 +71,25 @@ const channelSchema: yup.ObjectSchema<NormChannel> = yup.object({
       (CHANNEL_TYPES as readonly string[]).includes(v) ? v : "text"
     )
     .default("text"),
+  // Emoji is repaired rather than rejected — a stray ":smile:" becomes the
+  // type's default instead of failing the whole blueprint.
+  emoji: yup
+    .string()
+    .transform((v) => sanitizeEmoji(v))
+    .default(""),
+  topic: yup
+    .string()
+    .transform((v) => str(v).slice(0, MAX_TOPIC))
+    .default(""),
+  slowmode: yup
+    .number()
+    .transform((v) => clampInt(v, 0, MAX_SLOWMODE))
+    .default(0),
+  nsfw: yup.boolean().transform((v) => v === true).default(false),
+  userLimit: yup
+    .number()
+    .transform((v) => clampInt(v, 0, MAX_USER_LIMIT))
+    .default(0),
 });
 
 const categorySchema: yup.ObjectSchema<NormCategory> = yup.object({
@@ -59,12 +99,13 @@ const categorySchema: yup.ObjectSchema<NormCategory> = yup.object({
     .default("GENERAL"),
   emoji: yup
     .string()
-    .transform((v) => str(v) || "📁")
+    .transform((v) => sanitizeEmoji(v, "📁"))
     .default("📁"),
   channels: yup.array().of(channelSchema).ensure().default([]),
 });
 
 const roleSchema: yup.ObjectSchema<NormRole> = yup.object({
+  mentionable: yup.boolean().transform((v) => v === true).default(false),
   name: yup
     .string()
     .transform((v) => str(v).slice(0, 24))
@@ -118,7 +159,18 @@ function dedupeChannels(channels: NormChannel[]): Channel[] {
     const k = `${c.type}:${name.toLowerCase()}`;
     if (seen.has(k)) continue;
     seen.add(k);
-    out.push({ name, type: c.type });
+    const isVoice = VOICE_LIKE.includes(c.type);
+    out.push({
+      name,
+      type: c.type,
+      emoji: c.emoji || DEFAULT_CHANNEL_EMOJI[c.type] || "💬",
+      // Discord rejects these outright on the wrong channel kind, so strip them
+      // here rather than letting the deploy fail halfway through building.
+      ...(isVoice ? {} : c.topic ? { topic: c.topic } : {}),
+      ...(!isVoice && c.slowmode > 0 ? { slowmode: c.slowmode } : {}),
+      ...(!isVoice && c.nsfw ? { nsfw: true } : {}),
+      ...(isVoice && c.userLimit > 0 ? { userLimit: c.userLimit } : {}),
+    });
     if (out.length >= CAPS.channelsPerCategory) break;
   }
   return out;
@@ -171,6 +223,7 @@ export function validateBlueprint(raw: unknown): Blueprint {
       name,
       color: r.color || ROLE_PALETTE[roles.length % ROLE_PALETTE.length],
       hoist: r.hoist,
+      mentionable: r.mentionable,
       perms: PERM_PRESETS[r.perms],
     });
     if (roles.length >= CAPS.roles) break;

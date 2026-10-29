@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { buildMetadata } from "@/lib/seo";
-import { breadcrumbLd } from "@/lib/seo-data/jsonld";
+import { breadcrumbLd, courseLd } from "@/lib/seo-data/jsonld";
 import { JsonLd } from "@/components/json-ld";
 import { SiteHeader } from "@/components/site/site-header";
 import { SiteFooter } from "@/components/site/site-footer";
@@ -36,6 +36,16 @@ export default async function CoursePage({ params }: { params: Promise<{ slug: s
           { name: "Learn", path: "/learn" },
           { name: course.name, path: `/learn/course/${slug}` },
         ])}
+      />
+      <JsonLd
+        data={courseLd({
+          name: `Build a ${course.name}`,
+          description: `${course.tagline} Write real code in your browser, check it, and learn to build a Discord bot step by step — free, no setup.`,
+          path: `/learn/course/${slug}`,
+          level: course.level,
+          hours: course.hours,
+          topics: course.topics,
+        })}
       />
       <SiteHeader />
       <CourseRunner slug={course.slug} />

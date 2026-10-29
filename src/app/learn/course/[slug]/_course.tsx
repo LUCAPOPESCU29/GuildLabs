@@ -6,8 +6,10 @@ import { ArrowLeft, Check, BookOpen, Wrench, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Challenge } from "@/components/learn/challenge";
 import { Quiz } from "@/components/learn/quiz";
+import { CourseComplete } from "@/components/learn/course-complete";
 import { useLearnProgress } from "@/lib/learn/progress";
-import { flatten, getCourse, type Section } from "@/lib/learn/curriculum";
+import { trackLearn } from "@/lib/learn/track";
+import { COURSES, flatten, getCourse, type Section } from "@/lib/learn/curriculum";
 
 const KIND_ICON = { lesson: BookOpen, workshop: Wrench, lab: FlaskConical } as const;
 
@@ -16,10 +18,57 @@ export function CourseRunner({ slug }: { slug: string }) {
   const screens = React.useMemo(() => flatten(course), [course]);
   const { done, mark } = useLearnProgress();
   const [current, setCurrent] = React.useState(0);
+  const [reviewing, setReviewing] = React.useState(false);
 
   const key = (i: number) => `course:${course.slug}:${i}`;
   const completed = screens.filter((_, i) => done[key(i)]).length;
   const screen = screens[current];
+  const allDone = screens.length > 0 && completed === screens.length;
+
+  // Fire course_start once on mount.
+  const startedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    trackLearn("course_start", { course: course.slug });
+  }, [course.slug]);
+
+  // Resume: once progress hydrates from localStorage, jump to the first
+  // incomplete screen (runs once, and never overrides manual navigation).
+  const resumedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (resumedRef.current) return;
+    if (Object.keys(done).length === 0) return; // not hydrated / no progress yet
+    resumedRef.current = true;
+    const firstIncomplete = screens.findIndex((_, i) => !done[key(i)]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time resume after hydration
+    if (firstIncomplete > 0) setCurrent(firstIncomplete);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done, screens]);
+
+  // Persist a completed flag + fire course_complete once, when everything's done.
+  const completedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (allDone && !completedRef.current) {
+      completedRef.current = true;
+      if (!done[`course:${course.slug}:completed`]) mark(`course:${course.slug}:completed`);
+      trackLearn("course_complete", { course: course.slug, steps: screens.length });
+    }
+  }, [allDone, course.slug, done, mark, screens.length]);
+
+  // Pick a course to suggest next: the following not-yet-finished course.
+  const pickNextCourse = () => {
+    const idx = COURSES.findIndex((c) => c.slug === course.slug);
+    for (let n = 1; n < COURSES.length; n++) {
+      const cand = COURSES[(idx + n) % COURSES.length];
+      if (cand.slug === course.slug) continue;
+      const candScreens = flatten(cand);
+      const candDone = candScreens.every((_, i) => done[`course:${cand.slug}:${i}`]);
+      if (!candDone) return { slug: cand.slug, name: cand.name, emoji: cand.emoji };
+    }
+    return null;
+  };
+  const nextCourse = pickNextCourse();
 
   // Group screen indices by section for the sidebar.
   const groups = React.useMemo(() => {
@@ -49,7 +98,7 @@ export function CourseRunner({ slug }: { slug: string }) {
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[260px,1fr]">
           {/* Sidebar */}
-          <aside className="h-fit lg:sticky lg:top-6">
+          <aside className="h-fit">
             <div className="glass rounded-2xl p-4">
               <div className="flex items-center gap-2">
                 <span className="text-xl" aria-hidden>{course.emoji}</span>
@@ -93,7 +142,16 @@ export function CourseRunner({ slug }: { slug: string }) {
 
           {/* Main */}
           <div>
-            {screen.type === "step" ? (
+            {allDone && !reviewing ? (
+              <CourseComplete
+                name={course.name}
+                emoji={course.emoji}
+                lessons={course.sections.filter((s) => s.kind === "lesson").length}
+                steps={screens.length}
+                next={nextCourse}
+                onReview={() => setReviewing(true)}
+              />
+            ) : screen.type === "step" ? (
               <Challenge
                 key={current}
                 step={screen.step}
@@ -111,7 +169,13 @@ export function CourseRunner({ slug }: { slug: string }) {
                   <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{screen.section.title}</div>
                   <h2 className="mt-1 font-display text-2xl font-black">Quick check</h2>
                 </div>
-                <Quiz questions={screen.section.quiz!} onComplete={() => mark(key(current))} />
+                <Quiz
+                  questions={screen.section.quiz!}
+                  onComplete={(score) => {
+                    mark(key(current));
+                    trackLearn("quiz_complete", { lesson: screen.section.title, score, total: screen.section.quiz!.length });
+                  }}
+                />
                 <div className="mt-6 flex items-center justify-between">
                   <button onClick={() => setCurrent((c) => Math.max(0, c - 1))} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground cursor-pointer">
                     <ArrowLeft className="size-4" /> Back

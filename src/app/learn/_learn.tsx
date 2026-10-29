@@ -3,7 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowRight, Download, Sparkles, Code2, CheckCircle2, Terminal as TerminalIcon } from "lucide-react";
+import { ArrowRight, Download, Sparkles, Code2, CheckCircle2, Terminal as TerminalIcon, Clock, Zap } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Reveal } from "@/components/site/reveal";
 import { GooeyText } from "@/components/ui/gooey-text-morphing";
@@ -77,25 +78,42 @@ export function Learn() {
             <h2 className="font-display text-3xl font-black tracking-tight sm:text-4xl">Courses</h2>
             <p className="mt-3 max-w-lg text-muted-foreground">Each one builds a real bot: lessons with a quiz after each, a guided workshop, then a lab you tackle yourself.</p>
           </Reveal>
-          <div className="mt-8 grid gap-4 sm:grid-cols-2">
-            {COURSES.map((course) => {
+
+          {/* Regular courses — top grid */}
+          <div className="mt-8 grid gap-4 sm:grid-cols-3">
+            {COURSES.filter((c) => c.level !== "Advanced").map((course) => {
               const screens = flatten(course);
               const completed = screens.filter((_, i) => done[`course:${course.slug}:${i}`]).length;
               const lessons = course.sections.filter((s) => s.kind === "lesson").length;
+              const pct = screens.length ? (completed / screens.length) * 100 : 0;
               return (
                 <Link key={course.slug} href={`/learn/course/${course.slug}`} className="glass group flex flex-col rounded-3xl p-6 transition-all hover:-translate-y-1 hover:bg-primary/5">
                   <div className="flex items-start justify-between">
                     <span className="text-3xl" aria-hidden>{course.emoji}</span>
-                    <span className="rounded-full bg-muted/60 px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-widest text-muted-foreground">{course.level}</span>
+                    <span className={cn(
+                      "rounded-full px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-widest",
+                      course.level === "Beginner"
+                        ? "bg-emerald-500/10 text-emerald-500"
+                        : "bg-amber-500/10 text-amber-500"
+                    )}>{course.level}</span>
                   </div>
-                  <h3 className="mt-4 font-display text-xl font-black">{course.name}</h3>
+                  <h3 className="mt-4 font-display text-lg font-black">{course.name}</h3>
                   <p className="mt-1.5 flex-1 text-sm text-muted-foreground">{course.tagline}</p>
+                  <div className="mt-4 flex flex-wrap gap-1.5">
+                    {course.topics.map((t) => (
+                      <span key={t} className="rounded-md bg-muted/70 px-2 py-0.5 font-mono text-[0.65rem] text-muted-foreground">{t}</span>
+                    ))}
+                  </div>
                   <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
-                    <span>{lessons} lessons</span><span>·</span><span>1 workshop</span><span>·</span><span>1 lab</span>
+                    <span className="inline-flex items-center gap-1"><Clock className="size-3" />{course.hours}</span>
+                    <span>·</span>
+                    <span>{lessons} lessons</span>
+                    <span>·</span>
+                    <span>1 lab</span>
                   </div>
                   <div className="mt-3">
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${(completed / screens.length) * 100}%` }} />
+                      <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
                     </div>
                     <div className="mt-2 flex items-center justify-between">
                       <span className="text-xs text-muted-foreground">{completed}/{screens.length} steps</span>
@@ -105,12 +123,68 @@ export function Learn() {
                 </Link>
               );
             })}
-            {/* coming soon teaser */}
-            <div className="rounded-3xl border border-dashed border-card-border p-6">
-              <span className="text-3xl" aria-hidden>📈</span>
-              <h3 className="mt-4 font-display text-xl font-black text-muted-foreground">More courses coming</h3>
-              <p className="mt-1.5 text-sm text-muted-foreground">A charting bot, a moderation bot, and a Python track are on the way.</p>
-            </div>
+          </div>
+
+          {/* Featured advanced course */}
+          {COURSES.filter((c) => c.level === "Advanced").map((course) => {
+            const screens = flatten(course);
+            const completed = screens.filter((_, i) => done[`course:${course.slug}:${i}`]).length;
+            const lessons = course.sections.filter((s) => s.kind === "lesson").length;
+            const pct = screens.length ? (completed / screens.length) * 100 : 0;
+            return (
+              <Link key={course.slug} href={`/learn/course/${course.slug}`} className="group relative mt-4 flex flex-col overflow-hidden rounded-3xl p-px transition-all hover:-translate-y-1">
+                {/* gradient border */}
+                <div aria-hidden className="pointer-events-none absolute inset-0 rounded-3xl" style={{ background: "linear-gradient(135deg, oklch(0.75 0.18 280 / 0.6), oklch(0.72 0.22 165 / 0.4), oklch(0.75 0.18 280 / 0.15))" }} />
+                <div className="relative flex flex-col gap-6 overflow-hidden rounded-[calc(1.5rem-1px)] p-7 sm:flex-row sm:items-center" style={{ background: "linear-gradient(135deg, oklch(0.14 0.04 280), oklch(0.12 0.03 260))" }}>
+                  {/* glow */}
+                  <div aria-hidden className="pointer-events-none absolute -right-16 -top-16 size-64 rounded-full opacity-20 blur-3xl" style={{ background: "var(--primary)" }} />
+                  <div aria-hidden className="pointer-events-none absolute -bottom-10 left-1/3 size-48 rounded-full opacity-10 blur-3xl" style={{ background: "var(--accent)" }} />
+
+                  {/* left: meta */}
+                  <div className="relative flex-1">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-4xl" aria-hidden>{course.emoji}</span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/20 px-3 py-1 text-[0.65rem] font-bold uppercase tracking-widest text-primary">
+                        <Zap className="size-3" /> Advanced · {course.hours}
+                      </span>
+                    </div>
+                    <h3 className="mt-4 font-display text-2xl font-black text-white sm:text-3xl">{course.name}</h3>
+                    <p className="mt-2 max-w-lg text-sm text-white/60">{course.tagline}</p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {course.topics.map((t) => (
+                        <span key={t} className="rounded-md border border-white/10 bg-white/[0.06] px-2.5 py-1 font-mono text-[0.7rem] text-white/50">{t}</span>
+                      ))}
+                    </div>
+                    <div className="mt-5 flex items-center gap-4 text-xs text-white/40">
+                      <span>{lessons} lessons</span><span>·</span><span>1 guided workshop</span><span>·</span><span>1 lab</span><span>·</span><span>{screens.length} total steps</span>
+                    </div>
+                  </div>
+
+                  {/* right: progress + CTA */}
+                  <div className="relative flex w-full flex-col gap-4 sm:w-56">
+                    <div>
+                      <div className="flex items-center justify-between text-xs text-white/40">
+                        <span>Progress</span>
+                        <span>{completed}/{screens.length} steps</span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                    <span className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3 font-display text-sm font-bold text-primary-foreground shadow-[0_8px_24px_-6px_color-mix(in_oklab,var(--primary)_55%,transparent)] transition-[filter] group-hover:brightness-110">
+                      {completed > 0 ? "Continue" : "Start building"} <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+                    </span>
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
+
+          {/* coming soon teaser */}
+          <div className="mt-4 rounded-3xl border border-dashed border-card-border p-6">
+            <span className="text-3xl" aria-hidden>📈</span>
+            <h3 className="mt-4 font-display text-xl font-black text-muted-foreground">More courses coming</h3>
+            <p className="mt-1.5 text-sm text-muted-foreground">A charting bot, an economy bot, and a Python track are on the way.</p>
           </div>
         </div>
       </section>

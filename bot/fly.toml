@@ -1,0 +1,37 @@
+# GuildLabs Discord bot — Fly.io config
+# Discord bots maintain a persistent gateway WebSocket, so the machine must
+# never scale to zero. This file enforces that.
+
+app = "guildlabs-bot"
+primary_region = "iad"   # Ashburn (close to Discord US East). Change with `fly regions set`.
+
+[build]
+  # Use the Dockerfile in this directory.
+
+[env]
+  NODE_ENV = "production"
+  BOT_API_PORT = "8080"
+  # Secrets (DISCORD_TOKEN, CLIENT_ID, BOT_API_KEY) are set via `fly secrets`.
+
+# ── HTTP service for the bot's Express API (Vercel calls into this) ───────────
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false       # NEVER stop — gateway must stay connected
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 200
+
+# ── Process group ────────────────────────────────────────────────────────────
+[processes]
+  app = "node src/index.js"
+
+# ── VM size — small + cheap, covers a Discord bot easily ─────────────────────
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

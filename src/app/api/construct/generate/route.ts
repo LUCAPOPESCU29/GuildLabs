@@ -66,10 +66,19 @@ export async function POST(req: NextRequest) {
       { json: true }
     );
   } catch (e) {
+    // The model being unreachable shouldn't dead-end the builder. Groq's free
+    // tier has a daily token cap, so "rate limited" is a normal daily state,
+    // not an exception — serve the deterministic blueprint instead of an error
+    // and let the UI label it "offline". A timeout still surfaces, since a
+    // retry usually succeeds.
     if (e instanceof GroqError && e.kind === "timeout") {
       return fail("upstream_timeout", "The model took too long — try again.", 504);
     }
-    return fail("upstream_error", "Couldn't reach the model — try again.", 502);
+    return NextResponse.json({
+      ok: true,
+      blueprint: enforceCounts(fallbackBlueprint(description, answers), description),
+      source: "offline",
+    } satisfies GenerateOk);
   }
 
   let parsed: unknown;

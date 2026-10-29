@@ -59,3 +59,6 @@ beacon/data/
 # nested dependencies (safety)
 **/node_modules/
 
+
+# embedded repo history preserved on disk
+bot/.git-embedded-backup/
