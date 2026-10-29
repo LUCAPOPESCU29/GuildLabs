@@ -1,16 +1,23 @@
 /**
  * Server analytics for the admin dashboard.
  *
- * Reads straight from Discord's REST API with the bot token rather than from the
- * bot's own HTTP server, because the bot runs on a local machine with no public
- * URL — Vercel could never reach it. This way the dashboard works in production
- * whether or not the bot process happens to be running.
+ * Source 1 (preferred): the bot's own API (`BOT_API_URL/guilds`). The gateway
+ * list is complete and authoritative — Discord's REST `/users/@me/guilds`
+ * silently omits guilds (24 of 316 as of Oct 2026), so whenever the bot is
+ * reachable this is what the dashboard should show.
+ *
+ * Source 2 (fallback): Discord's REST API with the bot token, because the bot
+ * runs on a local machine with no stable public URL — Vercel can't always reach
+ * it. The fallback keeps the dashboard working in production whether or not the
+ * bot process happens to be running, at the cost of the lossy REST list.
  */
 
 import "server-only";
 
 const API = "https://discord.com/api/v10";
 const DISCORD_EPOCH = BigInt("1420070400000");
+const BOT_API = (process.env.BOT_API_URL || "http://localhost:3008").replace(/\/+$/, "");
+const BOT_KEY = process.env.BOT_API_KEY || "forge-local-dev";
 
 export type Guild = {
   id: string;
@@ -32,6 +39,7 @@ export type Guild = {
 export type Analytics = {
   ok: true;
   bot: { id: string; username: string; avatarUrl: string | null };
+  source: "bot-api" | "discord-rest";
   totals: {
     servers: number;
     members: number;
@@ -91,46 +99,91 @@ export async function getAnalytics(): Promise<Analytics | AnalyticsError> {
   try {
     const me = await discord("/users/@me", token);
 
-    // Paginate — the endpoint caps at 200 per page.
-    const raw: Record<string, unknown>[] = [];
-    let after: string | undefined;
-    for (let page = 0; page < 25; page++) {
-      const qs = new URLSearchParams({ limit: "200", with_counts: "true" });
-      if (after) qs.set("after", after);
-      const batch = (await discord(`/users/@me/guilds?${qs}`, token)) as Record<string, unknown>[];
-      raw.push(...batch);
-      if (batch.length < 200) break;
-      after = batch[batch.length - 1].id as string;
+    const now = Date.now();
+    let guilds: Guild[] = [];
+    let source: "bot-api" | "discord-rest" = "discord-rest";
+
+    // ── Source 1: the bot's own gateway list (complete) ─────────────────────
+    try {
+      const res = await fetch(`${BOT_API}/guilds`, {
+        headers: { "x-api-key": BOT_KEY },
+        cache: "no-store",
+        signal: AbortSignal.timeout(4_000),
+      });
+      if (res.ok) {
+        const list = (await res.json()) as Array<Record<string, unknown>>;
+        if (Array.isArray(list) && list.length > 0) {
+          source = "bot-api";
+          guilds = list.map((g) => {
+            const id = String(g.id);
+            const created = snowflakeDate(id);
+            const features = (g.features as string[]) ?? [];
+            const perms = BigInt((g.permissions as string) ?? "0");
+            return {
+              id,
+              name: String(g.name ?? "Unknown"),
+              icon: null,
+              iconUrl: (g.icon as string | null) ?? null,
+              owner: false,
+              memberCount: Number(g.memberCount ?? 0),
+              onlineCount: Number(g.onlineCount ?? 0),
+              createdAt: created.toISOString(),
+              ageDays: Math.max(0, Math.floor((now - created.getTime()) / 86_400_000)),
+              features,
+              isCommunity: features.includes("COMMUNITY"),
+              isVerified: features.includes("VERIFIED"),
+              isPartnered: features.includes("PARTNERED"),
+              hasAdmin: (perms & ADMINISTRATOR) === ADMINISTRATOR,
+            };
+          });
+        }
+      }
+    } catch {
+      // Bot unreachable (e.g. Vercel → local machine) — fall through to REST.
     }
 
-    const now = Date.now();
-    const guilds: Guild[] = raw
-      .map((g) => {
-        const id = String(g.id);
-        const created = snowflakeDate(id);
-        const features = (g.features as string[]) ?? [];
-        const perms = BigInt((g.permissions as string) ?? "0");
-        const icon = (g.icon as string | null) ?? null;
-        return {
-          id,
-          name: String(g.name ?? "Unknown"),
-          icon,
-          iconUrl: icon
-            ? `https://cdn.discordapp.com/icons/${id}/${icon}.${icon.startsWith("a_") ? "gif" : "png"}?size=64`
-            : null,
-          owner: !!g.owner,
-          memberCount: Number(g.approximate_member_count ?? 0),
-          onlineCount: Number(g.approximate_presence_count ?? 0),
-          createdAt: created.toISOString(),
-          ageDays: Math.max(0, Math.floor((now - created.getTime()) / 86_400_000)),
-          features,
-          isCommunity: features.includes("COMMUNITY"),
-          isVerified: features.includes("VERIFIED"),
-          isPartnered: features.includes("PARTNERED"),
-          hasAdmin: (perms & ADMINISTRATOR) === ADMINISTRATOR,
-        };
-      })
-      .sort((a, b) => b.memberCount - a.memberCount);
+    // ── Source 2 (fallback): Discord's REST guild list ──────────────────────
+    if (source === "discord-rest") {
+      // Paginate — the endpoint caps at 200 per page.
+      const raw: Record<string, unknown>[] = [];
+      let after: string | undefined;
+      for (let page = 0; page < 25; page++) {
+        const qs = new URLSearchParams({ limit: "200", with_counts: "true" });
+        if (after) qs.set("after", after);
+        const batch = (await discord(`/users/@me/guilds?${qs}`, token)) as Record<string, unknown>[];
+        raw.push(...batch);
+        if (batch.length < 200) break;
+        after = batch[batch.length - 1].id as string;
+      }
+
+      guilds = raw
+        .map((g) => {
+          const id = String(g.id);
+          const created = snowflakeDate(id);
+          const features = (g.features as string[]) ?? [];
+          const perms = BigInt((g.permissions as string) ?? "0");
+          const icon = (g.icon as string | null) ?? null;
+          return {
+            id,
+            name: String(g.name ?? "Unknown"),
+            icon,
+            iconUrl: icon
+              ? `https://cdn.discordapp.com/icons/${id}/${icon}.${icon.startsWith("a_") ? "gif" : "png"}?size=64`
+              : null,
+            owner: !!g.owner,
+            memberCount: Number(g.approximate_member_count ?? 0),
+            onlineCount: Number(g.approximate_presence_count ?? 0),
+            createdAt: created.toISOString(),
+            ageDays: Math.max(0, Math.floor((now - created.getTime()) / 86_400_000)),
+            features,
+            isCommunity: features.includes("COMMUNITY"),
+            isVerified: features.includes("VERIFIED"),
+            isPartnered: features.includes("PARTNERED"),
+            hasAdmin: (perms & ADMINISTRATOR) === ADMINISTRATOR,
+          };
+        })
+        .sort((a, b) => b.memberCount - a.memberCount);
+    }
 
     const sizes = guilds.map((g) => g.memberCount).sort((a, b) => a - b);
     const median = sizes.length
@@ -159,6 +212,7 @@ export async function getAnalytics(): Promise<Analytics | AnalyticsError> {
           ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=128`
           : null,
       },
+      source,
       totals: {
         servers: guilds.length,
         members: guilds.reduce((n, g) => n + g.memberCount, 0),

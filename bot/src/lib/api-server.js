@@ -3,6 +3,7 @@ import cors from "cors";
 import { Config } from "./config-store.js";
 import { deployBlueprint } from "./blueprint-deployer.js";
 import { normalizeBlueprint } from "./normalize-blueprint.js";
+import { getPresence, startPresenceRefresh } from "./presence-cache.js";
 
 const API_KEY = process.env.BOT_API_KEY ?? "forge-local-dev";
 
@@ -11,6 +12,8 @@ export function startApiServer(client, port = 3008) {
   app.use(express.json());
   app.use(cors({ origin: "*" }));
 
+  startPresenceRefresh(client);
+
   // Auth middleware
   function auth(req, res, next) {
     const key = req.headers["x-api-key"];
@@ -18,14 +21,23 @@ export function startApiServer(client, port = 3008) {
     next();
   }
 
-  // GET /guilds — list all guilds the bot is in
+  // GET /guilds — every guild the bot is in, from the gateway (the complete,
+  // authoritative list — Discord's REST /users/@me/guilds silently omits some).
+  // features/permissions power the admin dashboard; member/online counts come
+  // from the presence cache (REST with_counts, refreshed hourly).
   app.get("/guilds", auth, (req, res) => {
-    const guilds = client.guilds.cache.map((g) => ({
-      id: g.id,
-      name: g.name,
-      icon: g.iconURL({ size: 64 }),
-      memberCount: g.memberCount,
-    }));
+    const guilds = client.guilds.cache.map((g) => {
+      const presence = getPresence(g.id);
+      return {
+        id: g.id,
+        name: g.name,
+        icon: g.iconURL({ size: 64 }),
+        memberCount: presence?.members ?? g.memberCount ?? 0,
+        onlineCount: presence?.online ?? 0,
+        features: g.features ?? [],
+        permissions: g.members.me?.permissions.bitfield.toString() ?? "0",
+      };
+    });
     res.json(guilds);
   });
 
