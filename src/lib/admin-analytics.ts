@@ -91,11 +91,6 @@ function bucket(n: number): string {
 const BUCKETS = ["< 10", "10 – 49", "50 – 199", "200 – 999", "1k – 5k", "5k+"];
 
 export async function getAnalytics(): Promise<Analytics | AnalyticsError> {
-  const token = process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN;
-  if (!token) {
-    return { ok: false, status: 500, error: "DISCORD_BOT_TOKEN is not set on the server." };
-  }
-
   try {
     const now = Date.now();
     let guilds: Guild[] = [];
