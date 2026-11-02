@@ -97,11 +97,10 @@ export async function getAnalytics(): Promise<Analytics | AnalyticsError> {
   }
 
   try {
-    const me = await discord("/users/@me", token);
-
     const now = Date.now();
     let guilds: Guild[] = [];
     let source: "bot-api" | "discord-rest" = "discord-rest";
+    let bot: Analytics["bot"] = { id: "unknown", username: "Construct", avatarUrl: null };
 
     // ── Source 1: the bot's own gateway list (complete) ─────────────────────
     try {
@@ -136,6 +135,15 @@ export async function getAnalytics(): Promise<Analytics | AnalyticsError> {
               hasAdmin: (perms & ADMINISTRATOR) === ADMINISTRATOR,
             };
           });
+          // Identity comes from the bot itself — no Discord token needed here.
+          const health = await fetch(`${BOT_API}/health`, {
+            cache: "no-store",
+            signal: AbortSignal.timeout(2_000),
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          const tag = typeof health?.bot === "string" ? health.bot : "";
+          bot = { id: "bot", username: tag.split("#")[0] || "Construct", avatarUrl: null };
         }
       }
     } catch {
@@ -144,6 +152,24 @@ export async function getAnalytics(): Promise<Analytics | AnalyticsError> {
 
     // ── Source 2 (fallback): Discord's REST guild list ──────────────────────
     if (source === "discord-rest") {
+      const token = process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN;
+      if (!token) {
+        return {
+          ok: false,
+          status: 500,
+          error:
+            "No guild source: the bot API is unreachable and DISCORD_BOT_TOKEN is not set on the server.",
+        };
+      }
+      const me = await discord("/users/@me", token);
+      bot = {
+        id: String(me.id),
+        username: String(me.username),
+        avatarUrl: me.avatar
+          ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=128`
+          : null,
+      };
+
       // Paginate — the endpoint caps at 200 per page.
       const raw: Record<string, unknown>[] = [];
       let after: string | undefined;
@@ -205,13 +231,7 @@ export async function getAnalytics(): Promise<Analytics | AnalyticsError> {
 
     return {
       ok: true,
-      bot: {
-        id: String(me.id),
-        username: String(me.username),
-        avatarUrl: me.avatar
-          ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=128`
-          : null,
-      },
+      bot,
       source,
       totals: {
         servers: guilds.length,
