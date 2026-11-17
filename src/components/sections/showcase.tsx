@@ -579,45 +579,41 @@ function FeatureCard({
 // ── Welcome demo ────────────────────────────────────────────────────────────
 function WelcomeDemo() {
   const stage = useCycle(2200, 3);
+  const show = stage > 0;
+  // Both states live in the same grid cell (tallest one sets the height) and
+  // cross-fade in place. A mount/unmount swap here changed this card's height
+  // every cycle, which resized the whole page and made the viewport jump via
+  // scroll-anchoring — very visible on phones while using the builder below.
   return (
-    <div className="rounded-2xl bg-[#0a0a0c] p-3">
-      <AnimatePresence mode="wait">
-        {stage === 0 ? (
-          <motion.div
-            key="empty"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="grid h-32 place-items-center text-xs text-white/30"
-          >
-            #welcome — waiting…
-          </motion.div>
-        ) : (
-          <motion.div
-            key="msg"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="space-y-2"
-          >
-            <div className="flex items-center gap-2 text-xs text-white/50">
-              <Users className="size-3.5 text-[#86efac]" />
-              <span className="text-[#86efac]">TheLazyDev</span> joined the server.
-            </div>
-            <div className="rounded-xl border-l-2 border-[#5865F2] bg-white/[0.03] p-3">
-              <div className="flex items-center gap-2">
-                <div className="size-8 rounded-full bg-gradient-to-br from-[#5865F2] to-[#a78bfa]" />
-                <span className="text-sm font-bold">GuildLabs</span>
-                <span className="text-[10px] text-white/30">BOT</span>
-              </div>
-              <p className="mt-2 text-sm text-white/80">
-                Welcome to <strong>Aurora HQ</strong>, @TheLazyDev! 🎉
-              </p>
-              <div className="mt-2 text-[10px] text-white/40">Member #248 · just now</div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="grid rounded-2xl bg-[#0a0a0c] p-3">
+      <div
+        className="grid min-h-32 place-items-center text-xs text-white/30 transition-opacity duration-300 [grid-area:1/1]"
+        style={{ opacity: show ? 0 : 1 }}
+      >
+        #welcome — waiting…
+      </div>
+      <motion.div
+        initial={false}
+        animate={{ opacity: show ? 1 : 0, y: show ? 0 : 12 }}
+        transition={{ duration: 0.3 }}
+        className="space-y-2 [grid-area:1/1]"
+      >
+        <div className="flex items-center gap-2 text-xs text-white/50">
+          <Users className="size-3.5 text-[#86efac]" />
+          <span className="text-[#86efac]">TheLazyDev</span> joined the server.
+        </div>
+        <div className="rounded-xl border-l-2 border-[#5865F2] bg-white/[0.03] p-3">
+          <div className="flex items-center gap-2">
+            <div className="size-8 rounded-full bg-gradient-to-br from-[#5865F2] to-[#a78bfa]" />
+            <span className="text-sm font-bold">GuildLabs</span>
+            <span className="text-[10px] text-white/30">BOT</span>
+          </div>
+          <p className="mt-2 text-sm text-white/80">
+            Welcome to <strong>Aurora HQ</strong>, @TheLazyDev! 🎉
+          </p>
+          <div className="mt-2 text-[10px] text-white/40">Member #248 · just now</div>
+        </div>
+      </motion.div>
     </div>
   );
 }
@@ -667,21 +663,19 @@ function VerifyDemo() {
           </motion.button>
         </div>
 
-        <AnimatePresence>
-          {verified && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="flex items-center gap-2 rounded-xl bg-[#22c55e]/10 px-3 py-2 text-xs text-[#86efac]"
-            >
-              <span className="rounded-full bg-[#a8b1ff]/20 px-1.5 py-0.5 text-[10px] font-bold text-[#a8b1ff]">
-                @verified
-              </span>
-              role granted
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Always mounted, faded in place — mounting it changed the card
+            height every cycle and made the page jitter (see WelcomeDemo). */}
+        <motion.div
+          initial={false}
+          animate={{ opacity: verified ? 1 : 0, y: verified ? 0 : 8 }}
+          aria-hidden={!verified}
+          className="flex items-center gap-2 rounded-xl bg-[#22c55e]/10 px-3 py-2 text-xs text-[#86efac]"
+        >
+          <span className="rounded-full bg-[#a8b1ff]/20 px-1.5 py-0.5 text-[10px] font-bold text-[#a8b1ff]">
+            @verified
+          </span>
+          role granted
+        </motion.div>
       </div>
     </div>
   );
@@ -726,19 +720,18 @@ function LevelDemo() {
         <span>400 to next</span>
       </div>
 
-      <AnimatePresence>
-        {justLevelled && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            className="mt-3 flex items-center gap-2 rounded-xl bg-[#fde68a]/10 px-3 py-2 text-xs text-[#fde68a]"
-          >
-            <Sparkles className="size-3.5" />
-            Level up! Welcome to <strong>Level {level}</strong>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Always mounted and faded (never unmounted): mounting this banner
+          changed the card height every level-up tick, resizing the whole page
+          and jittering the viewport via scroll-anchoring. */}
+      <motion.div
+        initial={false}
+        animate={{ opacity: justLevelled ? 1 : 0, y: justLevelled ? 0 : 8 }}
+        aria-hidden={!justLevelled}
+        className="mt-3 flex items-center gap-2 rounded-xl bg-[#fde68a]/10 px-3 py-2 text-xs text-[#fde68a]"
+      >
+        <Sparkles className="size-3.5" />
+        Level up! Welcome to <strong>Level {level}</strong>
+      </motion.div>
     </div>
   );
 }

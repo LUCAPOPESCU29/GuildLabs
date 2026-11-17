@@ -111,9 +111,11 @@ export function AiResult({
         </div>
       </BlurFade>
 
-      {/* editor + viz */}
+      {/* editor + viz — min-w-0 on both items: the structure-tree SVG carries a
+          fixed intrinsic width, and without it the grid track sizes to that
+          width and overflows phones (the "page goes wide after generating"). */}
       <div className="grid gap-6 lg:grid-cols-[1fr_24rem]">
-        <BlurFade delay={0.1} className="glass-strong rounded-3xl p-5">
+        <BlurFade delay={0.1} className="glass-strong min-w-0 rounded-3xl p-5">
           <h3 className="mb-4 font-display text-xl text-foreground">Refine your server</h3>
           <p className="mb-4 text-sm text-muted-foreground">
             Drag to reorder, move channels between categories, rename, and tweak roles. Changes
@@ -122,7 +124,7 @@ export function AiResult({
           <BlueprintEditor blueprint={initial} onChange={setBp} />
         </BlurFade>
 
-        <aside className="lg:sticky lg:top-24 lg:self-start">
+        <aside className="min-w-0 lg:sticky lg:top-24 lg:self-start">
           <BlurFade delay={0.15} className="glass rounded-3xl p-4">
             {/* viz toggle */}
             <div className="mb-3 flex gap-1 rounded-full bg-muted/50 p-1">

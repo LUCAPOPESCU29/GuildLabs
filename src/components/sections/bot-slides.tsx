@@ -85,7 +85,7 @@ export function BotSlides({ bots }: { bots: BotSlide[] }) {
       aria-roledescription="carousel"
       aria-label="The GuildLabs bots"
       tabIndex={0}
-      className="relative mt-10 rounded-[2rem] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="relative mt-10 rounded-[2rem] outline-none overflow-x-clip focus-visible:ring-2 focus-visible:ring-ring"
       onKeyDown={(e) => {
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
           interactedRef.current = true;
